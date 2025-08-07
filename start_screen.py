@@ -1,26 +1,41 @@
-
 """
-Crystal Wizards - Start Screen Implementation
+Crystal Wizards - Enhanced Start Screen (FIXED VERSION)
+Features player setup, color selection, usernames, and magical effects
 """
 
 import pygame
 import sys
-from ui import Button
+from sound_manager import sound_manager
+
+class PlayerSetup:
+    """Handles individual player configuration"""
+    
+    def __init__(self, player_index, is_ai=False):
+        self.player_index = player_index
+        self.is_ai = is_ai
+        self.username = f"Player {player_index + 1}" if not is_ai else f"AI {player_index + 1}"
+        self.color = None  # FIXED: Player starts with no color selected
+        self.difficulty = 'medium' if is_ai else None
+        self.input_active = False
 
 class StartScreen:
-    """Start screen for selecting game configuration"""
+    """Enhanced start screen with full player configuration"""
     
     def __init__(self, screen_width=1200, screen_height=900):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.screen = pygame.display.set_mode((screen_width, screen_height))
-        pygame.display.set_caption("Crystal Wizards - Game Setup")
+        pygame.display.set_caption("Crystal Wizards - Enhanced Setup")
+        
+        # Initialize sound
+        sound_manager.load_sounds()
         
         # Fonts
         pygame.font.init()
-        self.font_title = pygame.font.Font(None, 64)
-        self.font_large = pygame.font.Font(None, 32)
-        self.font_medium = pygame.font.Font(None, 24)
+        self.font_title = pygame.font.Font(None, 72)
+        self.font_large = pygame.font.Font(None, 36)
+        self.font_medium = pygame.font.Font(None, 28)
+        self.font_small = pygame.font.Font(None, 24)
         
         # Colors
         self.colors = {
@@ -33,198 +48,575 @@ class StartScreen:
             'grey': (128, 128, 128),
             'light_grey': (200, 200, 200),
             'dark_grey': (64, 64, 64),
-            'gold': (255, 215, 0)
+            'gold': (255, 215, 0),
+            'purple': (128, 0, 128),
+            'background': (0, 0, 0)
         }
         
-        # Game configuration
-        self.num_human_players = 1
-        self.num_ai_players = 1
-        self.selected_config = None
+        # Game state
+        self.setup_phase = 'player_count'  # 'player_count', 'player_setup', 'ready'
+        self.num_human_players = 2
+        self.num_ai_players = 2
+        self.player_setups = []
+        self.current_setup_index = 0
         
-        # Create buttons
-        self.create_buttons()
+        # UI elements
+        self.buttons = {}
+        self.input_boxes = {}
+        self.create_ui_elements()
         
-    def create_buttons(self):
-        """Create all UI buttons"""
-        button_width = 200
-        button_height = 50
-        button_spacing = 20
+        # Animation
+        self.twinkle_timer = 0
+        self.twinkle_particles = []
         
+        # Debug mode
+        self.debug_mode = False
+        
+        # Play welcome sound
+        sound_manager.play_twinkle()
+        
+        if self.debug_mode:
+            print("DEBUG: EnhancedStartScreen initialized")
+    
+    def create_ui_elements(self):
+        """Create UI buttons and input elements"""
+        # Player count buttons
+        button_width = 150
+        button_height = 40
         center_x = self.screen_width // 2
-        start_y = 300
         
-        # Preset game mode buttons
-        self.buttons = []
+        y_start = 300
+        for i, (human, ai) in enumerate([(1, 3), (2, 2), (3, 1), (4, 0)]):
+            self.buttons[f'config_{i}'] = {
+                'rect': pygame.Rect(center_x - button_width//2, y_start + i * 60, button_width, button_height),
+                'text': f"{human} Human, {ai} AI",
+                'human': human,
+                'ai': ai,
+                'selected': i == 1  # Default to 2H, 2AI
+            }
         
-        # 1 Player vs 3 AI
-        self.btn_1p_vs_3ai = Button(
-            center_x - button_width // 2, start_y,
-            button_width, button_height,
-            "1 Player vs 3 AI", self.font_medium,
-            normal_color=self.colors['light_grey']
-        )
-        self.buttons.append(('1p_3ai', self.btn_1p_vs_3ai))
+        # Control buttons
+        self.buttons['next'] = {
+            'rect': pygame.Rect(center_x + 100, 650, 120, 50),
+            'text': 'Next',
+            'enabled': True
+        }
         
-        # 2 Players vs 2 AI  
-        self.btn_2p_vs_2ai = Button(
-            center_x - button_width // 2, start_y + (button_height + button_spacing),
-            button_width, button_height,
-            "2 Players vs 2 AI", self.font_medium,
-            normal_color=self.colors['light_grey']
-        )
-        self.buttons.append(('2p_2ai', self.btn_2p_vs_2ai))
+        self.buttons['back'] = {
+            'rect': pygame.Rect(center_x - 220, 650, 120, 50),
+            'text': 'Back',
+            'enabled': False
+        }
         
-        # 3 Players vs 1 AI
-        self.btn_3p_vs_1ai = Button(
-            center_x - button_width // 2, start_y + 2 * (button_height + button_spacing),
-            button_width, button_height,
-            "3 Players vs 1 AI", self.font_medium,
-            normal_color=self.colors['light_grey']
-        )
-        self.buttons.append(('3p_1ai', self.btn_3p_vs_1ai))
+        self.buttons['start'] = {
+            'rect': pygame.Rect(center_x - 60, 650, 120, 50),
+            'text': 'Start Game!',
+            'enabled': False
+        }
         
-        # 4 Players (no AI)
-        self.btn_4p_no_ai = Button(
-            center_x - button_width // 2, start_y + 3 * (button_height + button_spacing),
-            button_width, button_height,
-            "4 Players (No AI)", self.font_medium,
-            normal_color=self.colors['light_grey']
-        )
-        self.buttons.append(('4p_0ai', self.btn_4p_no_ai))
+        # Color selection buttons
+        colors = ['red', 'blue', 'green', 'yellow']
+        for i, color in enumerate(colors):
+            self.buttons[f'color_{color}'] = {
+                'rect': pygame.Rect(400 + i * 80, 400, 60, 60),
+                'color': color,
+                'available': True
+            }
         
-        # AI only (for testing)
-        self.btn_ai_only = Button(
-            center_x - button_width // 2, start_y + 4 * (button_height + button_spacing),
-            button_width, button_height,
-            "4 AI Only (Demo)", self.font_medium,
-            normal_color=self.colors['gold']
-        )
-        self.buttons.append(('0p_4ai', self.btn_ai_only))
-        
-        # Start game button
-        self.btn_start = Button(
-            center_x - button_width // 2, start_y + 6 * (button_height + button_spacing),
-            button_width, button_height,
-            "Start Game", self.font_large,
-            normal_color=self.colors['green'],
-            hover_color=(100, 255, 100)
-        )
-        self.btn_start.enabled = False  # Disabled until config selected
-        
-        # Exit button
-        self.btn_exit = Button(
-            center_x - button_width // 2, start_y + 7 * (button_height + button_spacing),
-            button_width, button_height,
-            "Exit", self.font_medium,
-            normal_color=self.colors['red'],
-            hover_color=(255, 100, 100)
-        )
-        
+        # Difficulty buttons for AI
+        difficulties = ['easy', 'medium', 'hard']
+        for i, diff in enumerate(difficulties):
+            self.buttons[f'diff_{diff}'] = {
+                'rect': pygame.Rect(400 + i * 100, 500, 80, 40),
+                'text': diff.title(),
+                'difficulty': diff
+            }
+    
     def handle_events(self):
         """Handle pygame events"""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                if self.debug_mode:
+                    print("DEBUG: Quit event received")
                 return 'quit'
-                
+            
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
+                    if self.debug_mode:
+                        print("DEBUG: Escape key pressed")
                     return 'quit'
-            
-            # Handle button clicks
-            for config_name, button in self.buttons:
-                if button.handle_event(event):
-                    self.selected_config = config_name
-                    self.btn_start.enabled = True
-                    
-                    # Update player counts based on selection
-                    if config_name == '1p_3ai':
-                        self.num_human_players, self.num_ai_players = 1, 3
-                    elif config_name == '2p_2ai':
-                        self.num_human_players, self.num_ai_players = 2, 2
-                    elif config_name == '3p_1ai':
-                        self.num_human_players, self.num_ai_players = 3, 1
-                    elif config_name == '4p_0ai':
-                        self.num_human_players, self.num_ai_players = 4, 0
-                    elif config_name == '0p_4ai':
-                        self.num_human_players, self.num_ai_players = 0, 4
-                    
-                    break
-            
-            # Handle start button
-            if self.btn_start.handle_event(event):
-                return 'start_game'
                 
-            # Handle exit button  
-            if self.btn_exit.handle_event(event):
-                return 'quit'
-                
-        return None
+                # Handle text input for usernames
+                if self.setup_phase == 'player_setup' and self.current_setup_index < len(self.player_setups):
+                    current_setup = self.player_setups[self.current_setup_index]
+                    if current_setup.input_active:
+                        if event.key == pygame.K_RETURN:
+                            current_setup.input_active = False
+                            if self.debug_mode:
+                                print(f"DEBUG: Username input finished: {current_setup.username}")
+                        elif event.key == pygame.K_BACKSPACE:
+                            current_setup.username = current_setup.username[:-1]
+                        else:
+                            if len(current_setup.username) < 15:
+                                current_setup.username += event.unicode
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:  # Left click
+                    if self.debug_mode:
+                        print(f"DEBUG: Mouse click at {event.pos}")
+                    result = self.handle_click(event.pos)
+                    if result:
+                        return result
         
+        return None
+    
+    def handle_click(self, pos):
+        """Handle mouse clicks"""
+        if self.setup_phase == 'player_count':
+            # Check config buttons
+            for key, button in self.buttons.items():
+                if key.startswith('config_') and button['rect'].collidepoint(pos):
+                    # Deselect all others
+                    for k in self.buttons:
+                        if k.startswith('config_'):
+                            self.buttons[k]['selected'] = False
+                    # Select this one
+                    button['selected'] = True
+                    self.num_human_players = button['human']
+                    self.num_ai_players = button['ai']
+                    sound_manager.play_sound('move', 0.5)
+                    if self.debug_mode:
+                        print(f"DEBUG: Selected config - {button['human']} Human, {button['ai']} AI")
+            
+            # Check next button
+            if self.buttons['next']['rect'].collidepoint(pos):
+                if self.debug_mode:
+                    print("DEBUG: Next button clicked in player_count phase")
+                self.advance_to_player_setup()
+        
+        elif self.setup_phase == 'player_setup':
+            if self.current_setup_index >= len(self.player_setups):
+                if self.debug_mode:
+                    print("DEBUG: Invalid setup index, returning to player_count")
+                self.setup_phase = 'player_count'
+                return None
+                
+            current_setup = self.player_setups[self.current_setup_index]
+            
+            # Check username input
+            username_rect = pygame.Rect(400, 300, 300, 40)
+            if username_rect.collidepoint(pos):
+                current_setup.input_active = True
+                if self.debug_mode:
+                    print(f"DEBUG: Username input activated for {current_setup.username}")
+            else:
+                current_setup.input_active = False
+            
+            # Check color buttons
+            for key, button in self.buttons.items():
+                if key.startswith('color_') and button['rect'].collidepoint(pos) and button['available']:
+                    # Free up old color if it was assigned
+                    old_color = current_setup.color
+                    if old_color and f'color_{old_color}' in self.buttons:
+                        self.buttons[f'color_{old_color}']['available'] = True
+                        if self.debug_mode:
+                            print(f"DEBUG: Freed up color {old_color}")
+                    
+                    # Assign new color
+                    current_setup.color = button['color']
+                    button['available'] = False
+                    sound_manager.play_charge()
+                    if self.debug_mode:
+                        print(f"DEBUG: Assigned color {button['color']} to {current_setup.username}")
+            
+            # Check difficulty buttons (for AI)
+            if current_setup.is_ai:
+                for key, button in self.buttons.items():
+                    if key.startswith('diff_') and button['rect'].collidepoint(pos):
+                        current_setup.difficulty = button['difficulty']
+                        sound_manager.play_sound('move', 0.5)
+                        if self.debug_mode:
+                            print(f"DEBUG: Set AI difficulty to {button['difficulty']}")
+            
+            # Check navigation buttons
+            # FIXED: Ensure next button is enabled before proceeding
+            if self.buttons['next']['rect'].collidepoint(pos) and self.buttons['next']['enabled']:
+                if self.current_setup_index < len(self.player_setups) - 1:
+                    self.current_setup_index += 1
+                    if self.debug_mode:
+                        print(f"DEBUG: Advanced to player {self.current_setup_index + 1}")
+                else:
+                    self.setup_phase = 'ready'
+                    self.buttons['start']['enabled'] = True
+                    if self.debug_mode:
+                        print("DEBUG: Advanced to ready phase")
+                sound_manager.play_sound('move', 0.8)
+            
+            if self.buttons['back']['rect'].collidepoint(pos) and self.current_setup_index > 0:
+                # When going back, free up the current player's chosen color
+                if current_setup.color:
+                    self.buttons[f'color_{current_setup.color}']['available'] = True
+                    current_setup.color = None
+                
+                self.current_setup_index -= 1
+                sound_manager.play_sound('move', 0.5)
+                if self.debug_mode:
+                    print(f"DEBUG: Went back to player {self.current_setup_index + 1}")
+        
+        elif self.setup_phase == 'ready':
+            if self.buttons['start']['rect'].collidepoint(pos):
+                if self.debug_mode:
+                    print("DEBUG: Start button clicked!")
+                    print("DEBUG: Generating final configuration...")
+                    for i, setup in enumerate(self.player_setups):
+                        print(f"DEBUG:   Player {i+1}: {setup.username} ({setup.color}) - {'AI' if setup.is_ai else 'Human'}")
+                
+                sound_manager.play_twinkle()
+                return 'start_game'
+            
+            if self.buttons['back']['rect'].collidepoint(pos):
+                self.setup_phase = 'player_setup'
+                self.current_setup_index = len(self.player_setups) - 1
+                sound_manager.play_sound('move', 0.5)
+                if self.debug_mode:
+                    print("DEBUG: Went back to player setup from ready phase")
+        
+        return None
+    
+    def advance_to_player_setup(self):
+        """Move to player setup phase"""
+        if self.debug_mode:
+            print(f"DEBUG: Advancing to player setup - {self.num_human_players} human, {self.num_ai_players} AI")
+        
+        self.setup_phase = 'player_setup'
+        self.player_setups = []
+        
+        # Reset all color availability
+        for key in self.buttons:
+            if key.startswith('color_'):
+                self.buttons[key]['available'] = True
+        
+        # Create player setups
+        total_players = self.num_human_players + self.num_ai_players
+        
+        for i in range(total_players):
+            is_ai = i >= self.num_human_players
+            setup = PlayerSetup(i, is_ai)
+            
+            # FIXED: Do NOT pre-assign colors. The player must choose.
+            # The setup.color will be None by default.
+            
+            self.player_setups.append(setup)
+            
+            if self.debug_mode:
+                print(f"DEBUG: Created setup for {setup.username} with no color assigned yet.")
+        
+        self.current_setup_index = 0
+        self.buttons['back']['enabled'] = True
+        sound_manager.play_twinkle()
+        
+        if self.debug_mode:
+            print("DEBUG: Player setup phase initialized")
+    
+    def update_twinkles(self, dt):
+        """Update magical twinkle particles"""
+        self.twinkle_timer += dt
+        
+        # Add new twinkles
+        if self.twinkle_timer > 0.5:
+            self.twinkle_timer = 0
+            import random
+            for _ in range(3):
+                self.twinkle_particles.append({
+                    'x': random.randint(50, self.screen_width - 50),
+                    'y': random.randint(50, self.screen_height - 50),
+                    'life': 2.0,
+                    'max_life': 2.0,
+                    'size': random.randint(2, 6)
+                })
+        
+        # Update existing twinkles
+        for particle in self.twinkle_particles[:]:
+            particle['life'] -= dt
+            if particle['life'] <= 0:
+                self.twinkle_particles.remove(particle)
+    
     def draw(self):
         """Draw the start screen"""
-        # Clear screen
-        self.screen.fill(self.colors['white'])
+        dt = 1/60  # Assume 60 FPS for animation
+        self.update_twinkles(dt)
         
-        # Draw title
-        title_text = self.font_title.render("Crystal Wizards", True, self.colors['black'])
-        title_rect = title_text.get_rect(center=(self.screen_width // 2, 100))
+        # Clear screen with magical background
+        self.screen.fill(self.colors['background'])
+        
+        # Draw twinkle particles
+        for particle in self.twinkle_particles:
+            alpha = int(255 * (particle['life'] / particle['max_life']))
+            color = (*self.colors['gold'][:3], alpha)
+            size = int(particle['size'] * (particle['life'] / particle['max_life']))
+            if size > 0:
+                pygame.draw.circle(self.screen, self.colors['gold'], 
+                                 (int(particle['x']), int(particle['y'])), size)
+        
+        # Draw title with magical glow
+        title_text = self.font_title.render("Crystal Wizards", True, self.colors['purple'])
+        title_rect = title_text.get_rect(center=(self.screen_width // 2, 80))
+        
+        # Glow effect
+        for offset in [(2, 2), (-2, -2), (2, -2), (-2, 2)]:
+            glow_text = self.font_title.render("Crystal Wizards", True, self.colors['gold'])
+            glow_rect = glow_text.get_rect(center=(title_rect.centerx + offset[0], title_rect.centery + offset[1]))
+            self.screen.blit(glow_text, glow_rect)
+        
         self.screen.blit(title_text, title_rect)
         
-        # Draw subtitle
-        subtitle_text = self.font_large.render("Select Game Configuration", True, self.colors['dark_grey'])
-        subtitle_rect = subtitle_text.get_rect(center=(self.screen_width // 2, 150))
-        self.screen.blit(subtitle_text, subtitle_rect)
+        # Draw phase-specific content
+        if self.setup_phase == 'player_count':
+            self.draw_player_count_phase()
+        elif self.setup_phase == 'player_setup':
+            self.draw_player_setup_phase()
+        elif self.setup_phase == 'ready':
+            self.draw_ready_phase()
+        
+        pygame.display.flip()
+    
+    def draw_player_count_phase(self):
+        """Draw player count selection"""
+        subtitle = self.font_large.render("Choose Player Configuration", True, self.colors['dark_grey'])
+        subtitle_rect = subtitle.get_rect(center=(self.screen_width // 2, 150))
+        self.screen.blit(subtitle, subtitle_rect)
+        
+        # Draw config buttons
+        for key, button in self.buttons.items():
+            if key.startswith('config_'):
+                color = self.colors['gold'] if button['selected'] else self.colors['light_grey']
+                pygame.draw.rect(self.screen, color, button['rect'], border_radius=8)
+                pygame.draw.rect(self.screen, self.colors['black'], button['rect'], 2, border_radius=8)
+                
+                text = self.font_medium.render(button['text'], True, self.colors['black'])
+                text_rect = text.get_rect(center=button['rect'].center)
+                self.screen.blit(text, text_rect)
+        
+        # Draw next button
+        self.draw_button('next')
         
         # Draw instructions
-        instruction_lines = [
-            "Choose the number of human players and AI opponents.",
-            "Each game supports 2-4 total players.",
-            "Crystal Wizards is a strategic board game where wizards",
-            "collect crystals and cast spells to eliminate opponents."
+        instructions = [
+            "Select how many human players and AI opponents you want.",
+            "Each game needs 2-4 total players for the best experience.",
+            "AI opponents will provide challenging strategic gameplay!"
         ]
         
-        y_offset = 200
-        for line in instruction_lines:
-            text = self.font_medium.render(line, True, self.colors['dark_grey'])
+        y_offset = 550
+        for instruction in instructions:
+            text = self.font_small.render(instruction, True, self.colors['dark_grey'])
             text_rect = text.get_rect(center=(self.screen_width // 2, y_offset))
             self.screen.blit(text, text_rect)
             y_offset += 25
+    
+    def draw_player_setup_phase(self):
+        """Draw individual player setup"""
+        # Safety check
+        if not self.player_setups or self.current_setup_index >= len(self.player_setups):
+            # Fallback to player count phase if something went wrong
+            if self.debug_mode:
+                print("DEBUG: Invalid player setup state, falling back to player_count")
+            self.setup_phase = 'player_count'
+            return
             
-        # Draw configuration buttons
-        for config_name, button in self.buttons:
-            button.draw(self.screen)
+        current_setup = self.player_setups[self.current_setup_index]
+        
+        # Progress indicator
+        progress_text = f"Setting up Player {self.current_setup_index + 1} of {len(self.player_setups)}"
+        progress = self.font_large.render(progress_text, True, self.colors['dark_grey'])
+        progress_rect = progress.get_rect(center=(self.screen_width // 2, 150))
+        self.screen.blit(progress, progress_rect)
+        
+        # Player type
+        player_type = "AI Player" if current_setup.is_ai else "Human Player"
+        type_text = self.font_medium.render(player_type, True, self.colors['purple'])
+        type_rect = type_text.get_rect(center=(self.screen_width // 2, 200))
+        self.screen.blit(type_text, type_rect)
+        
+        # Username input
+        username_label = self.font_medium.render("Username:", True, self.colors['black'])
+        self.screen.blit(username_label, (300, 270))
+        
+        username_rect = pygame.Rect(400, 300, 300, 40)
+        color = self.colors['white'] if current_setup.input_active else self.colors['light_grey']
+        pygame.draw.rect(self.screen, color, username_rect)
+        pygame.draw.rect(self.screen, self.colors['black'], username_rect, 2)
+        
+        username_text = self.font_medium.render(current_setup.username, True, self.colors['black'])
+        self.screen.blit(username_text, (username_rect.x + 10, username_rect.y + 10))
+        
+        if current_setup.input_active:
+            # Draw cursor
+            cursor_x = username_rect.x + 10 + username_text.get_width()
+            pygame.draw.line(self.screen, self.colors['black'], 
+                           (cursor_x, username_rect.y + 5), (cursor_x, username_rect.bottom - 5), 2)
+        
+        # Color selection
+        color_label = self.font_medium.render("Choose Color:", True, self.colors['black'])
+        self.screen.blit(color_label, (300, 370))
+        
+        for key, button in self.buttons.items():
+            if key.startswith('color_'):
+                color = self.colors[button['color']]
+                if not button['available'] and button['color'] != current_setup.color:
+                    color = self.colors['grey']
+                
+                pygame.draw.rect(self.screen, color, button['rect'], border_radius=8)
+                
+                # Highlight selected color
+                if button['color'] == current_setup.color:
+                    pygame.draw.rect(self.screen, self.colors['gold'], button['rect'], 4, border_radius=8)
+                else:
+                    pygame.draw.rect(self.screen, self.colors['black'], button['rect'], 2, border_radius=8)
+        
+        # AI difficulty selection
+        if current_setup.is_ai:
+            diff_label = self.font_medium.render("AI Difficulty:", True, self.colors['black'])
+            self.screen.blit(diff_label, (300, 470))
             
-            # Highlight selected configuration
-            if config_name == self.selected_config:
-                pygame.draw.rect(self.screen, self.colors['blue'], button.rect, 3)
+            for key, button in self.buttons.items():
+                if key.startswith('diff_'):
+                    color = self.colors['gold'] if button['difficulty'] == current_setup.difficulty else self.colors['light_grey']
+                    pygame.draw.rect(self.screen, color, button['rect'], border_radius=5)
+                    pygame.draw.rect(self.screen, self.colors['black'], button['rect'], 2, border_radius=5)
+                    
+                    text = self.font_small.render(button['text'], True, self.colors['black'])
+                    text_rect = text.get_rect(center=button['rect'].center)
+                    self.screen.blit(text, text_rect)
         
-        # Draw start and exit buttons
-        self.btn_start.draw(self.screen)
-        self.btn_exit.draw(self.screen)
+        # Navigation buttons
+        self.draw_button('back')
+        next_text = "Next" if self.current_setup_index < len(self.player_setups) - 1 else "Finish"
+        self.buttons['next']['text'] = next_text
         
-        # Draw selected configuration info
-        if self.selected_config:
-            config_text = f"Selected: {self.num_human_players} Human, {self.num_ai_players} AI"
-            text = self.font_medium.render(config_text, True, self.colors['blue'])
-            text_rect = text.get_rect(center=(self.screen_width // 2, 650))
+        # FIXED: Enable the 'next' button only if a color has been chosen
+        self.buttons['next']['enabled'] = current_setup.color is not None
+        
+        self.draw_button('next')
+    
+    def draw_ready_phase(self):
+        """Draw final ready screen"""
+        ready_text = self.font_large.render("Ready to Play!", True, self.colors['green'])
+        ready_rect = ready_text.get_rect(center=(self.screen_width // 2, 200))
+        self.screen.blit(ready_text, ready_rect)
+        
+        # Show player summary
+        y_offset = 280
+        for i, setup in enumerate(self.player_setups):
+            player_info = f"{setup.username} ({setup.color.title()}"
+            if setup.is_ai:
+                player_info += f" AI - {setup.difficulty.title()}"
+            player_info += ")"
+            
+            color = self.colors[setup.color] if setup.color else self.colors['black']
+            text = self.font_medium.render(player_info, True, color)
+            text_rect = text.get_rect(center=(self.screen_width // 2, y_offset))
             self.screen.blit(text, text_rect)
-            
-        pygame.display.flip()
+            y_offset += 35
         
+        
+        # Draw buttons
+        self.draw_button('back')
+        self.draw_button('start')
+    
+    def draw_button(self, button_key):
+        """Draw a button"""
+        if button_key not in self.buttons:
+            return
+        
+        button = self.buttons[button_key]
+        enabled = button.get('enabled', True)
+        
+        color = self.colors['green'] if button_key == 'start' else self.colors['light_grey']
+        if not enabled:
+            color = self.colors['grey']
+        
+        pygame.draw.rect(self.screen, color, button['rect'], border_radius=8)
+        pygame.draw.rect(self.screen, self.colors['black'], button['rect'], 2, border_radius=8)
+        
+        text_color = self.colors['black'] if enabled else self.colors['dark_grey']
+        text = self.font_medium.render(button['text'], True, text_color)
+        text_rect = text.get_rect(center=button['rect'].center)
+        self.screen.blit(text, text_rect)
+    
     def run(self):
-        """Run the start screen and return selected configuration"""
+        """Run the enhanced start screen"""
         clock = pygame.time.Clock()
+        
+        if self.debug_mode:
+            print("DEBUG: Start screen running...")
         
         while True:
             result = self.handle_events()
             
             if result == 'quit':
+                if self.debug_mode:
+                    print("DEBUG: Returning None (quit)")
                 return None
             elif result == 'start_game':
-                return {
+                # Prepare game configuration
+                config = {
+                    'players': [],
                     'num_human_players': self.num_human_players,
                     'num_ai_players': self.num_ai_players
                 }
                 
+                for setup in self.player_setups:
+                    # Validate that each player has a color
+                    if not setup.color:
+                        if self.debug_mode:
+                            print(f"DEBUG: ERROR - {setup.username} has no color assigned!")
+                        # This fallback should not be reached with the new UI validation, but is kept for safety
+                        available_colors = ['red', 'blue', 'green', 'yellow']
+                        for color in available_colors:
+                            if f'color_{color}' in self.buttons and self.buttons[f'color_{color}']['available']:
+                                setup.color = color
+                                self.buttons[f'color_{color}']['available'] = False
+                                break
+                        if not setup.color:
+                            setup.color = 'red'  # Ultimate fallback
+                    
+                    player_config = {
+                        'username': setup.username,
+                        'color': setup.color,
+                        'is_ai': setup.is_ai,
+                        'difficulty': setup.difficulty if setup.is_ai else None
+                    }
+                    config['players'].append(player_config)
+                
+                if self.debug_mode:
+                    print("DEBUG: Final configuration generated:")
+                    for i, player_config in enumerate(config['players']):
+                        print(f"DEBUG:   Player {i+1}: {player_config}")
+                
+                return config
+            
             self.draw()
             clock.tick(60)
+
+# Test function for standalone running
+def main():
+    """Main function for testing the start screen"""
+    pygame.init()
+    
+    start_screen = StartScreen()
+    config = start_screen.run()
+    
+    if config:
+        print("Start screen completed with configuration:")
+        for i, player_config in enumerate(config['players']):
+            player_type = "AI" if player_config['is_ai'] else "Human"
+            difficulty = f" ({player_config['difficulty']})" if player_config['is_ai'] else ""
+            print(f"  Player {i+1}: {player_config['username']} ({player_config['color']}) - {player_type}{difficulty}")
+    else:
+        print("Start screen was cancelled")
+    
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()

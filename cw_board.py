@@ -30,7 +30,6 @@ MAJOR CHANGES MADE:
 """
 
 import math
-from cw_entities import Die, HealingHotSpringsDie
 from new_board_layout import NewBoardLayout, convert_old_to_new_position, convert_new_to_old_position
 import pygame
 from pygame.locals import QUIT, MOUSEBUTTONDOWN, KEYDOWN, K_ESCAPE
@@ -176,7 +175,8 @@ class GameBoard:
             return True
         if position.startswith('mine_'):
             mine_color = self._get_mine_color_from_position(position)
-            return self.mines[mine_color]['crystals'] > 0
+            if mine_color and mine_color in self.mines:
+                return self.mines[mine_color]['crystals'] > 0
         return position == 'center'  # Healing springs always available
     
     def get_mine_color_from_position(self, mine_position):
@@ -242,14 +242,15 @@ class GameBoard:
                 elif event.type == KEYDOWN and event.key == K_ESCAPE:
                     return False
         
-
-    def mine_at_position(self, position, wizard):
-        """Perform mining action at a position"""
+    def resolve_mine_with_roll(self, position, wizard, mine_roll):
+        """
+        FIXED: Perform mining action using a pre-determined dice roll.
+        This method no longer rolls dice itself.
+        """
         if position == 'center':
-            healing_roll = HealingHotSpringsDie.roll()
-            wizard.heal(healing_roll)
-
-            outer_positions = [pos for pos in self.get_outer_ring_positions()]
+            # The provided roll is the healing amount
+            wizard.heal(mine_roll)
+            outer_positions = self.get_outer_ring_positions()
             if outer_positions:
                 import random
                 teleport_pos = random.choice(outer_positions)
@@ -257,59 +258,35 @@ class GameBoard:
             return ({}, None)
 
         elif position.startswith('mine_'):
-            mine_color = self._get_mine_color_from_position(position)
+            mine_color = self.get_mine_color_from_position(position)
+            if not mine_color or mine_color not in self.mines:
+                return None
+            
             mine_crystals = self.mines[mine_color]['crystals']
 
             if mine_crystals <= 0:
                 return None
 
-            use_blood_magic = False
-            if wizard.color == mine_color:
-                if hasattr(wizard, 'use_blood_magic_prompt'):
-                    use_blood_magic = wizard.use_blood_magic_prompt(mine_color)
-                else:
-                    use_blood_magic = True  # default AI logic
-
-            if use_blood_magic:
-                die1 = Die.roll()
-                die2 = Die.roll()
-
-                if hasattr(wizard, 'choose_blood_magic_dice'):
-                    health_die, mine_die = wizard.choose_blood_magic_dice(die1, die2)
-                else:
-                    if die1 <= mine_crystals and die2 <= mine_crystals:
-                        mine_die = max(die1, die2)
-                        health_die = min(die1, die2)
-                    elif die1 <= mine_crystals:
-                        mine_die = die1
-                        health_die = die2
-                    elif die2 <= mine_crystals:
-                        mine_die = die2
-                        health_die = die1
-                    else:
-                        mine_die = max(die1, die2)
-                        health_die = min(die1, die2)
-
-                wizard.heal(health_die)
-            else:
-                mine_die = Die.roll()
-
-            mine_roll = mine_die
+            # The logic for blood magic and choosing dice must be handled in the GUI
+            # before this function is called. This function now assumes a final, single
+            # roll result is provided.
 
             if mine_roll <= mine_crystals:
                 crystals_gained = {mine_color: mine_roll}
                 self.mines[mine_color]['crystals'] -= mine_roll
-                teleport_pos = self.colored_rectangles[mine_color]
+                teleport_pos = self.colored_rectangles.get(mine_color)
                 return (crystals_gained, teleport_pos)
-
-            return None
+            else:
+                # The roll was higher than available crystals
+                return None
 
         elif position in self.white_crystals and self.white_crystals[position] > 0:
+            # This case is now handled in game logic directly as it doesn't need a roll.
+            # Kept here as a fallback, but should not be called.
             self.white_crystals[position] -= 1
             return ({'white': 1}, None)
 
         return None
-
     
     def add_white_crystals_to_empty_tiles(self, amount):
         """Add white crystals back to empty grey hexagon tiles"""

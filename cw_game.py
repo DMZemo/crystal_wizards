@@ -4,7 +4,8 @@ CORRECTED VERSION - Compatible with multi-wizard tile logic
 """
 
 import random
-from cw_entities import Wizard, AIWizard, SpellCard, SpellCardDeck, Crystal, Die, HealingHotSpringsDie
+import collections
+from cw_entities import Wizard, AIWizard, SpellCard, SpellCardDeck, Crystal
 from cw_board import GameBoard
 
 class CrystalWizardsGame:
@@ -27,6 +28,9 @@ class CrystalWizardsGame:
         self.moves_used = 0
         self.mines_used = 0
         self.spells_cast = 0
+        
+        # FIXED: Add an action log for the ticker tape
+        self.action_log = collections.deque(maxlen=20)
         
     def initialize_game(self):
         """Initialize the game with players and board setup"""
@@ -56,6 +60,8 @@ class CrystalWizardsGame:
                 card = self.spell_deck.draw_card()
                 if card:
                     player.hand.append(card)
+        
+        self.action_log.append("The battle for the crystals begins!")
                     
     def place_wizards_on_board(self):
         """Place wizards on starting positions on the outer ring"""
@@ -96,66 +102,83 @@ class CrystalWizardsGame:
         
         old_location = player.location
         
-        # Step 1: Remove the specific wizard from their old location.
-        # This now requires passing the player object.
         self.board.remove_wizard_from_position(old_location, player)
-        
-        # Step 2: Update the player's internal location.
         player.location = target_position
-        
-        # Step 3: Add the wizard to the new location. This will append them
-        # to the list if the tile is already occupied.
         self.board.add_wizard_to_position(target_position, player)
         
         self.moves_used += 1
         self.current_actions += 1
+        
+        # LOGGING-FIX
+        self.action_log.append(f"{player.color.title()} Wizard moved to {target_position}.")
         return True
     
-    def mine_action(self, player):
-        """Perform mining action at player's current location"""
+    def mine_white_crystal(self, player, position):
+        """Perform a mining action on a tile with a white crystal (no dice roll)."""
+        if not self.can_mine(player):
+            return False
+        
+        if position in self.board.white_crystals and self.board.white_crystals[position] > 0:
+            self.board.white_crystals[position] -= 1
+            player.add_crystals('white', 1)
+            
+            self.mines_used += 1
+            self.current_actions += 1
+            
+            # LOGGING-FIX
+            self.action_log.append(f"{player.color.title()} Wizard mined 1 white crystal.")
+            return True
+        return False
+
+    def resolve_mine_with_roll(self, player, position, roll_result):
+        """FIXED: Resolve a mining action using a pre-determined dice roll from the GUI."""
         if not self.can_mine(player):
             return False
             
-        position = player.location
-        mine_result = self.board.mine_at_position(position, player)
+        mine_result = self.board.resolve_mine_with_roll(position, player, roll_result)
         
         if mine_result:
             crystals_gained, teleport_position = mine_result
             
-            # Add crystals to player's reserve (up to max capacity)
+            # LOGGING-FIX: Log healing and crystal gains
+            if position == 'center':
+                self.action_log.append(f"{player.color.title()} healed for {roll_result} HP at the Springs.")
+            if crystals_gained:
+                for color, amount in crystals_gained.items():
+                    self.action_log.append(f"{player.color.title()} mined {amount} {color} crystal(s).")
+            
+            # Add crystals to player's reserve
             for color, amount in crystals_gained.items():
                 player.add_crystals(color, amount)
             
             # Handle teleportation if applicable
             if teleport_position:
-                print(f"{player.color} wizard teleported to {teleport_position}")
-                
-                # FIXED: Use the corrected logic to move the player during teleport.
+                self.action_log.append(f"{player.color.title()} was teleported to {teleport_position}.")
                 old_location = player.location
                 self.board.remove_wizard_from_position(old_location, player)
                 player.location = teleport_position
                 self.board.add_wizard_to_position(teleport_position, player)
-        
-        self.mines_used += 1
-        self.current_actions += 1
-        return True
+            
+            self.mines_used += 1
+            self.current_actions += 1
+            return True
+        else:
+            # LOGGING-FIX: Log a failed mine attempt
+            self.action_log.append(f"{player.color.title()} tried to mine, but failed.")
+            self.mines_used += 1
+            self.current_actions += 1
+            return False
     
     def cast_spell(self, player, spell_card):
         """Cast a spell using the specified spell card"""
         if not self.can_cast_spell(player):
             return False
-            
-        if spell_card not in player.cards_laid_down:
+        if spell_card not in player.cards_laid_down or not spell_card.is_fully_charged():
             return False
             
-        if not spell_card.is_fully_charged():
-            return False
-            
-        # Get adjacent positions and damage all wizards there
         adjacent_positions = self.board.get_adjacent_positions(player.location)
         targets = []
         
-        # FIXED: get_wizard_at_position returns a LIST. We must iterate through it.
         for pos in adjacent_positions:
             wizards_at_pos = self.board.get_wizard_at_position(pos)
             if wizards_at_pos:
@@ -163,18 +186,23 @@ class CrystalWizardsGame:
                     if target_wizard != player:
                         targets.append(target_wizard)
         
-        # Deal damage to all targets
         damage = spell_card.get_damage()
+        
+        # LOGGING-FIX
+        self.action_log.append(f"{player.color.title()} cast a {damage}-damage spell!")
+        
+        if not targets:
+            self.action_log.append("...but no one was in range!")
+
         for target in targets:
             target.take_damage(damage)
+            self.action_log.append(f"{target.color.title()} Wizard took {damage} damage.")
             if target.health <= 0:
                 self.eliminate_player(target)
         
-        # Return crystals to board and discard spell card
         self.return_crystals_to_board(spell_card.crystals_used)
         player.cards_laid_down.remove(spell_card)
         
-        # Draw a new spell card
         new_card = self.spell_deck.draw_card()
         if new_card:
             player.hand.append(new_card)
@@ -182,21 +210,20 @@ class CrystalWizardsGame:
         self.spells_cast += 1
         self.current_actions += 1
         
-        # Check for game over
         self.check_game_over()
         return True
     
     def eliminate_player(self, player):
         """Remove a player from the game"""
-        # FIXED: Pass the specific player object to remove from the board.
-        # This prevents other wizards on the same tile from being removed.
+        # LOGGING-FIX
+        self.action_log.append(f"{player.color.title()} Wizard has been eliminated!")
+        
         self.board.remove_wizard_from_position(player.location, player)
         
         if player in self.players:
             player_index = self.players.index(player)
             self.players.remove(player)
             
-            # Adjust current player index if necessary
             if player_index < self.current_player_index:
                 self.current_player_index -= 1
             elif self.current_player_index >= len(self.players) and len(self.players) > 0:
@@ -206,31 +233,31 @@ class CrystalWizardsGame:
         """Return used crystals back to the board"""
         for color, amount in crystals_used.items():
             if color in ['red', 'blue', 'green', 'yellow']:
-                # Return colored crystals to their respective mines
                 self.board.mines[color]['crystals'] = min(9, self.board.mines[color]['crystals'] + amount)
             elif color == 'white':
-                # Return white crystals to empty grey tiles
                 self.board.add_white_crystals_to_empty_tiles(amount)
     
     def end_turn(self):
         """End the current player's turn and move to next player"""
-        # Reset action counters
+        current_player_name = self.get_current_player().color.title()
+        
         self.current_actions = 0
         self.moves_used = 0
         self.mines_used = 0
         self.spells_cast = 0
         
-        # Move to next player
         if len(self.players) > 0:
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
+        
+        # LOGGING-FIX
+        next_player_name = self.get_current_player().color.title()
+        self.action_log.append(f"--- {current_player_name}'s turn ends. {next_player_name}'s turn begins. ---")
     
     def execute_ai_turn(self, ai_player):
         """Execute AI player's turn with simple strategy"""
-        # This function now works correctly because its helper methods are fixed.
         while self.current_actions < self.max_actions_per_turn:
             action_taken = False
             
-            # Priority 1: Cast spell if possible and enemies are adjacent
             if self.can_cast_spell(ai_player):
                 for spell_card in ai_player.cards_laid_down:
                     if spell_card.is_fully_charged():
@@ -241,21 +268,19 @@ class CrystalWizardsGame:
                             break
             if action_taken: continue
             
-            # Priority 2: Mine if at a beneficial location
             if self.can_mine(ai_player):
                 if self.should_ai_mine(ai_player):
-                    self.mine_action(ai_player)
-                    action_taken = True
+                    if self.board.has_crystals_at_position(ai_player.location) and not self.board.is_mine(ai_player.location) and not self.board.is_healing_springs(ai_player.location):
+                        self.mine_white_crystal(ai_player, ai_player.location)
+                        action_taken = True
             if action_taken: continue
 
-            # Priority 3: Move toward objectives
             if self.can_move(ai_player):
                 target_position = self.get_ai_move_target(ai_player)
                 if target_position:
                     self.move_player(ai_player, target_position)
                     action_taken = True
             
-            # If no action was taken, end turn
             if not action_taken:
                 break
     
@@ -263,7 +288,6 @@ class CrystalWizardsGame:
         """Get list of enemy wizards adjacent to the player"""
         adjacent_positions = self.board.get_adjacent_positions(player.location)
         enemies = []
-        # FIXED: Handle lists of wizards per position
         for pos in adjacent_positions:
             wizards_at_pos = self.board.get_wizard_at_position(pos)
             if wizards_at_pos:
@@ -276,11 +300,9 @@ class CrystalWizardsGame:
         """Determine if AI should mine at current location"""
         position = ai_player.location
         
-        # Mine if at healing springs and health is low
         if self.board.is_healing_springs(position) and ai_player.health < 4:
             return True
             
-        # Mine if at a crystal location and has space for crystals
         if self.board.has_crystals_at_position(position) and ai_player.get_total_crystals() < 5:
             return True
             
@@ -295,7 +317,6 @@ class CrystalWizardsGame:
         best_score = -1
         
         for pos in adjacent_positions:
-            # AI can move into occupied spaces
             score = self.evaluate_position_for_ai(pos, ai_player)
             if score > best_score:
                 best_score = score
@@ -307,18 +328,15 @@ class CrystalWizardsGame:
         """Evaluate how good a position is for the AI player"""
         score = 0
         
-        # Prefer positions with crystals
         if self.board.has_crystals_at_position(position):
             score += 10
         
-        # Prefer positions near healing if health is low
         if ai_player.health < 3:
             if self.board.is_healing_springs(position):
                 score += 20
             elif self.board.distance_to_healing_springs(position) < 3:
                 score += 5
         
-        # Prefer positions near enemies if we can cast spells
         adjacent_enemies = len(self.get_adjacent_enemies_at_position(position, ai_player))
         if adjacent_enemies > 0 and ai_player.has_charged_spells():
             score += 15 * adjacent_enemies
@@ -329,7 +347,6 @@ class CrystalWizardsGame:
         """Get enemies that would be adjacent if player moved to position"""
         adjacent_positions = self.board.get_adjacent_positions(position)
         enemies = []
-        # FIXED: Handle lists of wizards per position
         for pos in adjacent_positions:
             wizards_at_pos = self.board.get_wizard_at_position(pos)
             if wizards_at_pos:
@@ -343,6 +360,8 @@ class CrystalWizardsGame:
         if len(self.players) <= 1:
             self.game_over = True
             self.winner = self.players[0] if self.players else None
+            if self.winner:
+                self.action_log.append(f"GAME OVER! {self.winner.color.title()} Wizard is victorious!")
     
     def get_game_state(self):
         """Get current game state for GUI display"""
@@ -356,5 +375,6 @@ class CrystalWizardsGame:
             'mines_used': self.mines_used,
             'spells_cast': self.spells_cast,
             'game_over': self.game_over,
-            'winner': self.winner
+            'winner': self.winner,
+            'action_log': self.action_log
         }
