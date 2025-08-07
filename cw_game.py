@@ -1,0 +1,360 @@
+"""
+Crystal Wizards - Core Game Logic
+CORRECTED VERSION - Compatible with multi-wizard tile logic
+"""
+
+import random
+from cw_entities import Wizard, AIWizard, SpellCard, SpellCardDeck, Crystal, Die, HealingHotSpringsDie
+from cw_board import GameBoard
+
+class CrystalWizardsGame:
+    def __init__(self, num_players=2, num_ai=0):
+        self.num_players = num_players
+        self.num_ai = num_ai
+        self.total_players = num_players + num_ai
+        
+        self.board = GameBoard()
+        self.players = []
+        
+        self.current_player_index = 0
+        self.current_actions = 0
+        self.max_actions_per_turn = 3
+        self.spell_deck = SpellCardDeck()
+        self.game_over = False
+        self.winner = None
+        
+        # Action counters for current turn
+        self.moves_used = 0
+        self.mines_used = 0
+        self.spells_cast = 0
+        
+    def initialize_game(self):
+        """Initialize the game with players and board setup"""
+        colors = ['red', 'blue', 'green', 'yellow']
+        
+        # Create human players
+        for i in range(self.num_players):
+            wizard = Wizard(colors[i], health=6)
+            self.players.append(wizard)
+            
+        # Create AI players
+        for i in range(self.num_ai):
+            ai_wizard = AIWizard(colors[self.num_players + i], health=6)
+            self.players.append(ai_wizard)
+            
+        # Initialize board and place wizards
+        self.board.initialize_board()
+        self.place_wizards_on_board()
+        
+        # Initialize spell deck
+        self.spell_deck.initialize_deck()
+        self.spell_deck.shuffle()
+        
+        # Deal initial spell cards to each player
+        for player in self.players:
+            for _ in range(3):  # Each player starts with 3 spell cards
+                card = self.spell_deck.draw_card()
+                if card:
+                    player.hand.append(card)
+                    
+    def place_wizards_on_board(self):
+        """Place wizards on starting positions on the outer ring"""
+        for i, player in enumerate(self.players):
+            # Place players on their matching colored rectangle positions
+            start_pos = self.board.get_colored_rectangle_position(player.color)
+            player.location = start_pos
+            # Use add_wizard_to_position to ensure it's always a list
+            self.board.add_wizard_to_position(start_pos, player)
+            
+    def get_current_player(self):
+        """Get the currently active player"""
+        return self.players[self.current_player_index]
+    
+    def can_move(self, player):
+        """Check if player can move (max 3 moves per turn)"""
+        return self.moves_used < 3 and self.current_actions < self.max_actions_per_turn
+    
+    def can_mine(self, player):
+        """Check if player can mine (max 2 mines per turn)"""
+        return self.mines_used < 2 and self.current_actions < self.max_actions_per_turn
+    
+    def can_cast_spell(self, player):
+        """Check if player can cast spell (max 1 spell per turn)"""
+        return self.spells_cast < 1 and self.current_actions < self.max_actions_per_turn
+
+
+    def move_player(self, player, target_position):
+        """
+        FIXED: Move a player to a target position. This logic is now simplified
+        and correctly uses the board methods that handle multiple wizards per tile.
+        """
+        if not self.can_move(player):
+            return False
+            
+        if not self.board.is_adjacent(player.location, target_position):
+            return False
+        
+        old_location = player.location
+        
+        # Step 1: Remove the specific wizard from their old location.
+        # This now requires passing the player object.
+        self.board.remove_wizard_from_position(old_location, player)
+        
+        # Step 2: Update the player's internal location.
+        player.location = target_position
+        
+        # Step 3: Add the wizard to the new location. This will append them
+        # to the list if the tile is already occupied.
+        self.board.add_wizard_to_position(target_position, player)
+        
+        self.moves_used += 1
+        self.current_actions += 1
+        return True
+    
+    def mine_action(self, player):
+        """Perform mining action at player's current location"""
+        if not self.can_mine(player):
+            return False
+            
+        position = player.location
+        mine_result = self.board.mine_at_position(position, player)
+        
+        if mine_result:
+            crystals_gained, teleport_position = mine_result
+            
+            # Add crystals to player's reserve (up to max capacity)
+            for color, amount in crystals_gained.items():
+                player.add_crystals(color, amount)
+            
+            # Handle teleportation if applicable
+            if teleport_position:
+                print(f"{player.color} wizard teleported to {teleport_position}")
+                
+                # FIXED: Use the corrected logic to move the player during teleport.
+                old_location = player.location
+                self.board.remove_wizard_from_position(old_location, player)
+                player.location = teleport_position
+                self.board.add_wizard_to_position(teleport_position, player)
+        
+        self.mines_used += 1
+        self.current_actions += 1
+        return True
+    
+    def cast_spell(self, player, spell_card):
+        """Cast a spell using the specified spell card"""
+        if not self.can_cast_spell(player):
+            return False
+            
+        if spell_card not in player.cards_laid_down:
+            return False
+            
+        if not spell_card.is_fully_charged():
+            return False
+            
+        # Get adjacent positions and damage all wizards there
+        adjacent_positions = self.board.get_adjacent_positions(player.location)
+        targets = []
+        
+        # FIXED: get_wizard_at_position returns a LIST. We must iterate through it.
+        for pos in adjacent_positions:
+            wizards_at_pos = self.board.get_wizard_at_position(pos)
+            if wizards_at_pos:
+                for target_wizard in wizards_at_pos:
+                    if target_wizard != player:
+                        targets.append(target_wizard)
+        
+        # Deal damage to all targets
+        damage = spell_card.get_damage()
+        for target in targets:
+            target.take_damage(damage)
+            if target.health <= 0:
+                self.eliminate_player(target)
+        
+        # Return crystals to board and discard spell card
+        self.return_crystals_to_board(spell_card.crystals_used)
+        player.cards_laid_down.remove(spell_card)
+        
+        # Draw a new spell card
+        new_card = self.spell_deck.draw_card()
+        if new_card:
+            player.hand.append(new_card)
+        
+        self.spells_cast += 1
+        self.current_actions += 1
+        
+        # Check for game over
+        self.check_game_over()
+        return True
+    
+    def eliminate_player(self, player):
+        """Remove a player from the game"""
+        # FIXED: Pass the specific player object to remove from the board.
+        # This prevents other wizards on the same tile from being removed.
+        self.board.remove_wizard_from_position(player.location, player)
+        
+        if player in self.players:
+            player_index = self.players.index(player)
+            self.players.remove(player)
+            
+            # Adjust current player index if necessary
+            if player_index < self.current_player_index:
+                self.current_player_index -= 1
+            elif self.current_player_index >= len(self.players) and len(self.players) > 0:
+                self.current_player_index = 0
+
+    def return_crystals_to_board(self, crystals_used):
+        """Return used crystals back to the board"""
+        for color, amount in crystals_used.items():
+            if color in ['red', 'blue', 'green', 'yellow']:
+                # Return colored crystals to their respective mines
+                self.board.mines[color]['crystals'] = min(9, self.board.mines[color]['crystals'] + amount)
+            elif color == 'white':
+                # Return white crystals to empty grey tiles
+                self.board.add_white_crystals_to_empty_tiles(amount)
+    
+    def end_turn(self):
+        """End the current player's turn and move to next player"""
+        # Reset action counters
+        self.current_actions = 0
+        self.moves_used = 0
+        self.mines_used = 0
+        self.spells_cast = 0
+        
+        # Move to next player
+        if len(self.players) > 0:
+            self.current_player_index = (self.current_player_index + 1) % len(self.players)
+    
+    def execute_ai_turn(self, ai_player):
+        """Execute AI player's turn with simple strategy"""
+        # This function now works correctly because its helper methods are fixed.
+        while self.current_actions < self.max_actions_per_turn:
+            action_taken = False
+            
+            # Priority 1: Cast spell if possible and enemies are adjacent
+            if self.can_cast_spell(ai_player):
+                for spell_card in ai_player.cards_laid_down:
+                    if spell_card.is_fully_charged():
+                        adjacent_enemies = self.get_adjacent_enemies(ai_player)
+                        if adjacent_enemies:
+                            self.cast_spell(ai_player, spell_card)
+                            action_taken = True
+                            break
+            if action_taken: continue
+            
+            # Priority 2: Mine if at a beneficial location
+            if self.can_mine(ai_player):
+                if self.should_ai_mine(ai_player):
+                    self.mine_action(ai_player)
+                    action_taken = True
+            if action_taken: continue
+
+            # Priority 3: Move toward objectives
+            if self.can_move(ai_player):
+                target_position = self.get_ai_move_target(ai_player)
+                if target_position:
+                    self.move_player(ai_player, target_position)
+                    action_taken = True
+            
+            # If no action was taken, end turn
+            if not action_taken:
+                break
+    
+    def get_adjacent_enemies(self, player):
+        """Get list of enemy wizards adjacent to the player"""
+        adjacent_positions = self.board.get_adjacent_positions(player.location)
+        enemies = []
+        # FIXED: Handle lists of wizards per position
+        for pos in adjacent_positions:
+            wizards_at_pos = self.board.get_wizard_at_position(pos)
+            if wizards_at_pos:
+                for wizard in wizards_at_pos:
+                    if wizard != player:
+                        enemies.append(wizard)
+        return enemies
+    
+    def should_ai_mine(self, ai_player):
+        """Determine if AI should mine at current location"""
+        position = ai_player.location
+        
+        # Mine if at healing springs and health is low
+        if self.board.is_healing_springs(position) and ai_player.health < 4:
+            return True
+            
+        # Mine if at a crystal location and has space for crystals
+        if self.board.has_crystals_at_position(position) and ai_player.get_total_crystals() < 5:
+            return True
+            
+        return False
+    
+    def get_ai_move_target(self, ai_player):
+        """Get the best move target for AI player"""
+        current_pos = ai_player.location
+        adjacent_positions = self.board.get_adjacent_positions(current_pos)
+        
+        best_target = None
+        best_score = -1
+        
+        for pos in adjacent_positions:
+            # AI can move into occupied spaces
+            score = self.evaluate_position_for_ai(pos, ai_player)
+            if score > best_score:
+                best_score = score
+                best_target = pos
+        
+        return best_target
+    
+    def evaluate_position_for_ai(self, position, ai_player):
+        """Evaluate how good a position is for the AI player"""
+        score = 0
+        
+        # Prefer positions with crystals
+        if self.board.has_crystals_at_position(position):
+            score += 10
+        
+        # Prefer positions near healing if health is low
+        if ai_player.health < 3:
+            if self.board.is_healing_springs(position):
+                score += 20
+            elif self.board.distance_to_healing_springs(position) < 3:
+                score += 5
+        
+        # Prefer positions near enemies if we can cast spells
+        adjacent_enemies = len(self.get_adjacent_enemies_at_position(position, ai_player))
+        if adjacent_enemies > 0 and ai_player.has_charged_spells():
+            score += 15 * adjacent_enemies
+        
+        return score
+    
+    def get_adjacent_enemies_at_position(self, position, player):
+        """Get enemies that would be adjacent if player moved to position"""
+        adjacent_positions = self.board.get_adjacent_positions(position)
+        enemies = []
+        # FIXED: Handle lists of wizards per position
+        for pos in adjacent_positions:
+            wizards_at_pos = self.board.get_wizard_at_position(pos)
+            if wizards_at_pos:
+                for wizard in wizards_at_pos:
+                    if wizard != player:
+                        enemies.append(wizard)
+        return enemies
+    
+    def check_game_over(self):
+        """Check if the game is over (only one player remaining)"""
+        if len(self.players) <= 1:
+            self.game_over = True
+            self.winner = self.players[0] if self.players else None
+    
+    def get_game_state(self):
+        """Get current game state for GUI display"""
+        return {
+            'board': self.board,
+            'players': self.players,
+            'current_player': self.get_current_player(),
+            'current_actions': self.current_actions,
+            'max_actions': self.max_actions_per_turn,
+            'moves_used': self.moves_used,
+            'mines_used': self.mines_used,
+            'spells_cast': self.spells_cast,
+            'game_over': self.game_over,
+            'winner': self.winner
+        }
