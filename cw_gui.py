@@ -3,7 +3,7 @@ Crystal Wizards - Pygame GUI Implementation (Fixed Indentation + Player Names)
 
 This version fixes indentation and updates UI labels to show player-provided
 usernames from the start screen when available, falling back to color-based
-names otherwise.
+names otherwise. It also adds a quit confirmation dialog on Esc or window close.
 """
 
 import math
@@ -33,6 +33,90 @@ COLORS = {
 }
 
 
+class QuitConfirmDialog:
+    def __init__(self, screen, font):
+        self.screen = screen
+        self.font = font
+        self.visible = False
+        self.result = None  # True for Yes, False for No
+
+    def show(self):
+        self.visible = True
+        self.result = None
+
+    def hide(self):
+        self.visible = False
+
+    def run_modal(self):
+        """Run a simple modal loop until user selects Yes/No or cancels."""
+        self.show()
+        clock = pygame.time.Clock()
+        while self.visible and self.result is None:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    # Treat window close inside dialog as a cancel
+                    self.result = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_n):
+                        self.result = False
+                    elif event.key in (pygame.K_RETURN, pygame.K_y):
+                        self.result = True
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    mx, my = event.pos
+                    if self._btn_yes.collidepoint((mx, my)):
+                        self.result = True
+                    elif self._btn_no.collidepoint((mx, my)):
+                        self.result = False
+
+            self.draw()
+            pygame.display.flip()
+            clock.tick(60)
+
+        self.hide()
+        return bool(self.result)
+
+    def draw(self):
+        sw, sh = self.screen.get_size()
+        # Dim background
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 160))
+        self.screen.blit(overlay, (0, 0))
+
+        # Dialog
+        w, h = int(sw * 0.45), int(sh * 0.25)
+        x, y = (sw - w) // 2, (sh - h) // 2
+        dialog_rect = pygame.Rect(x, y, w, h)
+        pygame.draw.rect(self.screen, COLORS['white'], dialog_rect, border_radius=10)
+        pygame.draw.rect(self.screen, COLORS['black'], dialog_rect, 2, border_radius=10)
+
+        # Text
+        title = self.font.render("Quit Crystal Wizards?", True, COLORS['black'])
+        subtitle = pygame.font.Font(None, int(h * 0.18)).render(
+            "Are you sure you want to quit?", True, COLORS['dark_grey']
+        )
+        self.screen.blit(title, title.get_rect(center=(x + w // 2, y + int(h * 0.3))))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(x + w // 2, y + int(h * 0.52))))
+
+        # Buttons
+        btn_w, btn_h = int(w * 0.28), int(h * 0.26)
+        gap = int(w * 0.08)
+        bx1 = x + w // 2 - btn_w - gap // 2
+        bx2 = x + w // 2 + gap // 2
+        by = y + int(h * 0.65)
+        self._btn_yes = pygame.Rect(bx1, by, btn_w, btn_h)
+        self._btn_no = pygame.Rect(bx2, by, btn_w, btn_h)
+
+        pygame.draw.rect(self.screen, COLORS['green'], self._btn_yes, border_radius=8)
+        pygame.draw.rect(self.screen, COLORS['black'], self._btn_yes, 2, border_radius=8)
+        pygame.draw.rect(self.screen, COLORS['red'], self._btn_no, border_radius=8)
+        pygame.draw.rect(self.screen, COLORS['black'], self._btn_no, 2, border_radius=8)
+
+        yes_text = pygame.font.Font(None, int(btn_h * 0.5)).render("Yes", True, COLORS['white'])
+        no_text = pygame.font.Font(None, int(btn_h * 0.5)).render("No", True, COLORS['white'])
+        self.screen.blit(yes_text, yes_text.get_rect(center=self._btn_yes.center))
+        self.screen.blit(no_text, no_text.get_rect(center=self._btn_no.center))
+
+
 class GameGUI:
     def __init__(self, game):
         """Initialize the game GUI to fill the entire screen in a closable window."""
@@ -45,7 +129,7 @@ class GameGUI:
         self.screen_width = info.current_w
         self.screen_height = info.current_h
 
-        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)
         pygame.display.set_caption("Crystal Wizards")
 
         pygame.font.init()
@@ -85,7 +169,10 @@ class GameGUI:
         self.spell_card_rects = []
         self.visible_hand = []
 
-    # ------------- Utility for name display -------------
+        # Quit dialog
+        self.quit_dialog = QuitConfirmDialog(self.screen, self.font_large)
+
+    # ---- Utility for name display ----
     def display_name(self, player):
         name = getattr(player, 'name', None)
         if name:
@@ -96,7 +183,7 @@ class GameGUI:
             base += " (AI)"
         return base
 
-    # ------------- Basic helpers -------------
+    # ---- Basic helpers ----
     def show_blocking_dialog(self, wizard, damage, caster):
         """Placeholder for a blocking dialog; returns 0 (no block)."""
         print(f"{self.display_name(caster)} is casting a spell with {damage} damage on {self.display_name(wizard)}. Block it?")
@@ -126,7 +213,7 @@ class GameGUI:
             'mine_west': (self.board_center_x - self.mine_distance, self.board_center_y)
         })
 
-    # ------------- Main loop and events -------------
+    # ---- Main loop and events ----
     def run(self):
         """Main game loop"""
         clock = pygame.time.Clock()
@@ -138,14 +225,22 @@ class GameGUI:
             if not self.is_dice_rolling:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        running = False
+                        if self.quit_dialog.run_modal():
+                            running = False
+                            break
                     elif event.type == pygame.MOUSEBUTTONDOWN:
                         self.handle_mouse_click(event.pos)
                     elif event.type == pygame.KEYDOWN:
-                        self.handle_key_press(event.key)
+                        if event.key == pygame.K_ESCAPE:
+                            if self.quit_dialog.run_modal():
+                                running = False
+                                break
+                        else:
+                            self.handle_key_press(event.key)
                     elif event.type == pygame.VIDEORESIZE:
                         self.handle_resize(event)
 
+                    # Pass all events to action panel
                     self.handle_action_panel_event(event)
 
             current_player = self.game.get_current_player()
@@ -169,6 +264,7 @@ class GameGUI:
     def handle_resize(self, event):
         """Handle window resize events for dynamic scaling"""
         self.screen_width, self.screen_height = event.w, event.h
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)
         self.board_center_x = self.screen_width // 2 - 200
         self.board_center_y = self.screen_height // 2
         self.calculate_position_coordinates()
@@ -247,7 +343,7 @@ class GameGUI:
                         self.selected_spell_card = None
                     else:
                         print("Failed to cast spell.")
-            return
+                return
 
         if self.current_action_mode == 'move':
             if self.highlight_manager.is_highlighted(position):
@@ -258,12 +354,12 @@ class GameGUI:
                     if self.action_panel.selected_action == 'move':
                         adjacent_positions = self.game.board.get_adjacent_positions(current_player.location)
                         self.highlight_manager.set_move_highlights(adjacent_positions)
-            return
+                return
 
         if self.current_action_mode == 'mine':
             if self.highlight_manager.is_highlighted(position):
                 self.initiate_mine_sequence(current_player, position)
-            return
+                return
 
         # Default click: try a move if allowed
         if self.game.can_move(current_player):
@@ -386,10 +482,9 @@ class GameGUI:
             return
         if key == pygame.K_SPACE:
             self.game.end_turn()
-        elif key == pygame.K_ESCAPE:
-            self.selected_spell_card = None
+        # Esc is handled by quit dialog in the event loop
 
-    # ------------- Drawing -------------
+    # ---- Drawing ----
     def draw(self):
         """Draw the entire game state"""
         self.screen.fill(COLORS['light_grey'])
@@ -643,8 +738,10 @@ class GameGUI:
             else:
                 is_selected = (card == self.selected_spell_card)
 
-            self.draw_spell_card_in_fan(card, card_x, card_y, card_width, card_height,
-                                        angle, is_in_hand, is_selected, current_player)
+            self.draw_spell_card_in_fan(
+                card, card_x, card_y, card_width, card_height,
+                angle, is_in_hand, is_selected, current_player
+            )
 
     def draw_spell_card_in_fan(self, card, x, y, width, height, rotation_angle,
                                is_in_hand, is_selected, current_player):
