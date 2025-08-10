@@ -4,6 +4,7 @@ Crystal Wizards - Game Entities (Wizards, Spells, etc.)
 """
 
 import random
+import pygame
 
 class Wizard:
     ''' A wizards starting location is the rectangle that matchs their color.'''
@@ -18,6 +19,10 @@ class Wizard:
         self.hand = []  # Spell cards in hand (hidden)
         self.cards_laid_down = []  # Spell cards laid down (visible, being charged)
         self.max_hand_size = 3
+        
+        # Crystal blocking highlight animation
+        self.is_blocking_highlighted = False
+        self.blocking_highlight_timer = 0
 
         # set starting location, based on color, start on rectangle that matches color
         self.starting_location = {
@@ -50,10 +55,90 @@ class Wizard:
     def can_hold_more_crystals(self):
         """Check if wizard can hold more crystals"""
         return sum(self.crystals.values()) < self.max_crystals
+
+    def get_total_crystals_for_blocking(self):
+        """Get total crystals available for blocking (including white crystals as wildcards)"""
+        return sum(self.crystals.values())
+
+    def can_block_damage(self):
+        """Check if wizard has any crystals available for blocking"""
+        return self.get_total_crystals_for_blocking() > 0
+
+    def spend_crystals_for_blocking(self, amount):
+        """
+        Spend crystals for blocking damage. Returns actual amount spent.
+        Spends crystals in priority order: colored crystals first, then white crystals.
+        """
+        if amount <= 0:
+            return 0
+        
+        crystals_to_spend = min(amount, self.get_total_crystals_for_blocking())
+        remaining_to_spend = crystals_to_spend
+        crystals_spent = {'red': 0, 'blue': 0, 'green': 0, 'yellow': 0, 'white': 0}
+        
+        # First spend colored crystals (non-white)
+        for color in ['red', 'blue', 'green', 'yellow']:
+            if remaining_to_spend <= 0:
+                break
+            available = self.crystals[color]
+            to_spend = min(remaining_to_spend, available)
+            if to_spend > 0:
+                self.crystals[color] -= to_spend
+                crystals_spent[color] = to_spend
+                remaining_to_spend -= to_spend
+        
+        # Then spend white crystals if needed
+        if remaining_to_spend > 0:
+            available = self.crystals['white']
+            to_spend = min(remaining_to_spend, available)
+            if to_spend > 0:
+                self.crystals['white'] -= to_spend
+                crystals_spent['white'] = to_spend
+                remaining_to_spend -= to_spend
+        
+        return crystals_to_spend, crystals_spent
     
-    def take_damage(self, damage):
-        """Take damage and reduce health"""
-        self.health = max(0, self.health - damage)
+    def take_damage(self, damage, gui=None, caster=None):
+        """Take damage and reduce health, with optional crystal blocking"""
+        if damage <= 0:
+            return
+            
+        actual_damage = damage
+        blocked_amount = 0
+        
+        # Check if wizard can block and has crystals
+        if self.can_block_damage():
+            from sound_manager import sound_manager
+            
+            if isinstance(self, AIWizard):
+                # AI automatically uses maximum crystals available
+                crystals_to_use = min(damage, self.get_total_crystals_for_blocking())
+                if crystals_to_use > 0:
+                    blocked_amount, crystals_spent = self.spend_crystals_for_blocking(crystals_to_use)
+                    actual_damage = max(0, damage - blocked_amount)
+                    
+                    # Play blocking sound and trigger highlight
+                    sound_manager.play_twinkle()
+                    self._start_blocking_highlight()
+                    
+            else:
+                # Human player - trigger blocking dialog if GUI is available
+                if gui is not None:
+                    blocked_amount = gui.show_blocking_dialog(self, damage, caster)
+                    actual_damage = max(0, damage - blocked_amount)
+                    
+                    if blocked_amount > 0:
+                        sound_manager.play_sound('twinkle')
+                        self._start_blocking_highlight()
+        
+        # Apply the final damage
+        self.health = max(0, self.health - actual_damage)
+
+    def _start_blocking_highlight(self):
+        """Start visual highlight effect for blocking (brief animation)"""
+        # This will be handled by the GUI - we just set a flag
+        self.is_blocking_highlighted = True
+        self.blocking_highlight_timer = pygame.time.get_ticks()
     
     def heal(self, amount):
         """Heal the wizard up to max health"""
@@ -159,7 +244,7 @@ class AIWizard(Wizard):
             spell_card = self.cards_laid_down[spell_index]
             if spell_card.is_fully_charged():
                 damage = spell_card.get_damage()
-                target.take_damage(damage)
+                target.take_damage(damage, gui=None, caster=self)  # AI casting has no GUI access
                 self.cards_laid_down.remove(spell_card)
 
 

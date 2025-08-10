@@ -87,6 +87,11 @@ class HighlightManager:
         """Set positions to highlight for mining"""
         self.highlighted_positions = set(positions)
         self.highlight_type = 'mine'
+
+    def set_cast_highlights(self, positions):
+        """Set positions to highlight for casting spells"""
+        self.highlighted_positions = set(positions)
+        self.highlight_type = 'cast'
         
     def is_highlighted(self, position):
         """Check if a position is highlighted"""
@@ -106,12 +111,18 @@ class HighlightManager:
             elif self.highlight_type == 'mine':
                 # Blue highlight for mining
                 pygame.draw.circle(highlight_surface, (0, 100, 255, 100), (radius, radius), radius)
+
+            elif self.highlight_type == 'cast':
+                # Red highlight for casting spells
+                pygame.draw.circle(highlight_surface, (255, 0, 0, 100), (radius, radius), radius)
             else:
                 # Default yellow highlight
                 pygame.draw.circle(highlight_surface, (255, 255, 0, 100), (radius, radius), radius)
                 
             # Blit the highlight surface to the screen
             screen.blit(highlight_surface, (x - radius, y - radius))
+
+        
 
 class SoundManager:
     """Simple sound manager for game audio feedback"""
@@ -148,15 +159,18 @@ class SoundManager:
 class ActionPanel:
     """Panel containing action buttons for the current player"""
     
-    def __init__(self, x, y, font):
+    def __init__(self, x, y, font, scale_factor=1.0):
         self.x = x
         self.y = y
         self.font = font
-        self.button_width = 80
-        self.button_height = 40
-        self.button_spacing = 10
+        self.scale_factor = scale_factor
         
-        # Create action buttons
+        # Scale button dimensions for visibility
+        self.button_width = int(120 * scale_factor)
+        self.button_height = int(50 * scale_factor) 
+        self.button_spacing = int(15 * scale_factor)
+        
+        # Create action buttons in a 2x2 grid for better space usage
         self.move_button = Button(
             x, y, self.button_width, self.button_height,
             "Move", font, normal_color=(100, 200, 100)
@@ -168,14 +182,17 @@ class ActionPanel:
             "Mine", font, normal_color=(100, 100, 200)
         )
         
+        # Second row of buttons
+        button_row_2_y = y + self.button_height + self.button_spacing
+        
         self.cast_button = Button(
-            x + 2 * (self.button_width + self.button_spacing), y,
+            x, button_row_2_y,
             self.button_width, self.button_height,
-            "Cast", font, normal_color=(200, 100, 100)
+            "Cast Spell", font, normal_color=(200, 100, 100)
         )
         
         self.end_turn_button = Button(
-            x + 3 * (self.button_width + self.button_spacing), y,
+            x + self.button_width + self.button_spacing, button_row_2_y,
             self.button_width, self.button_height,
             "End Turn", font, normal_color=(200, 200, 100)
         )

@@ -109,7 +109,7 @@ class CrystalWizardsGame:
         self.moves_used += 1
         self.current_actions += 1
         
-        # LOGGING-FIX
+        # LOGGING: Log the move action
         self.action_log.append(f"{player.color.title()} Wizard moved to {target_position}.")
         return True
     
@@ -119,13 +119,17 @@ class CrystalWizardsGame:
             return False
         
         if position in self.board.white_crystals and self.board.white_crystals[position] > 0:
+            # Check if player can hold more crystals before removing from board
+            if not player.can_hold_more_crystals():
+                return "reserve_full"  # Return special value to indicate capacity issue
+            
             self.board.white_crystals[position] -= 1
             player.add_crystals('white', 1)
             
             self.mines_used += 1
             self.current_actions += 1
             
-            # LOGGING-FIX
+            # LOGGING: Log the mining action
             self.action_log.append(f"{player.color.title()} Wizard mined 1 white crystal.")
             return True
         return False
@@ -134,13 +138,16 @@ class CrystalWizardsGame:
         """FIXED: Resolve a mining action using a pre-determined dice roll from the GUI."""
         if not self.can_mine(player):
             return False
+        
+        # CRYSTAL-MINING-BUG-FIX: Removed restrictive capacity check
+        # The board-level logic in resolve_mine_with_roll handles partial collection correctly
             
         mine_result = self.board.resolve_mine_with_roll(position, player, roll_result)
         
         if mine_result:
             crystals_gained, teleport_position = mine_result
             
-            # LOGGING-FIX: Log healing and crystal gains
+            # LOGGING: Log healing and crystal gains
             if position == 'center':
                 self.action_log.append(f"{player.color.title()} healed for {roll_result} HP at the Springs.")
             if crystals_gained:
@@ -163,13 +170,13 @@ class CrystalWizardsGame:
             self.current_actions += 1
             return True
         else:
-            # LOGGING-FIX: Log a failed mine attempt
+            # LOGGING a failed mine attempt
             self.action_log.append(f"{player.color.title()} tried to mine, but failed.")
             self.mines_used += 1
             self.current_actions += 1
             return False
     
-    def cast_spell(self, player, spell_card):
+    def cast_spell(self, player, spell_card, gui=None):
         """Cast a spell using the specified spell card"""
         if not self.can_cast_spell(player):
             return False
@@ -188,14 +195,14 @@ class CrystalWizardsGame:
         
         damage = spell_card.get_damage()
         
-        # LOGGING-FIX
+        # LOGGING for the spell casting action
         self.action_log.append(f"{player.color.title()} cast a {damage}-damage spell!")
         
         if not targets:
             self.action_log.append("...but no one was in range!")
 
         for target in targets:
-            target.take_damage(damage)
+            target.take_damage(damage, gui=gui, caster=player)
             self.action_log.append(f"{target.color.title()} Wizard took {damage} damage.")
             if target.health <= 0:
                 self.eliminate_player(target)
@@ -215,7 +222,7 @@ class CrystalWizardsGame:
     
     def eliminate_player(self, player):
         """Remove a player from the game"""
-        # LOGGING-FIX
+        # LOGGING for player elimination
         self.action_log.append(f"{player.color.title()} Wizard has been eliminated!")
         
         self.board.remove_wizard_from_position(player.location, player)
@@ -378,3 +385,12 @@ class CrystalWizardsGame:
             'winner': self.winner,
             'action_log': self.action_log
         }
+    
+    def get_winner(self):
+        """Get the winner of the game.
+        
+        Returns:
+            Wizard object: The winning player if game is over and there's a winner
+            None: If the game is not over or there's no winner
+        """
+        return self.winner

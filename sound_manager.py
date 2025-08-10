@@ -1,4 +1,3 @@
-
 """
 Crystal Wizards - Sound Manager
 Handles all audio effects and music for the game
@@ -29,18 +28,22 @@ class SoundManager:
         """Load all sound effects"""
         if not self.mixer_available:
             return
-            
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        def p(name):
+            return os.path.join(base_dir, 'sounds', name)
+
         sound_files = {
-            'twinkle': 'crystal_wizards2\sounds\twinkle.wav',
-            'spell_cast': 'crystal_wizards2\sounds\spell_cast.wav', 
-            'teleport': 'crystal_wizards2\sounds\teleport.wav',
-            'dice_roll': 'crystal_wizards2\sounds\dice_roll.wav',
-            'move': 'crystal_wizards2\sounds\move.wav',
-            'mine': 'crystal_wizards2\sounds\mine.wav',
-            'charge': 'crystal_wizards2\sounds\charge.wav',
-            'heal': 'crystal_wizards2\sounds\heal.wav'
+            'twinkle': p('twinkle.wav'),
+            'spell_cast': p('spell_cast.wav'),
+            'teleport': p('teleport.wav'),
+            'dice_roll': p('dice_roll.wav'),
+            'move': p('move.wav'),
+            'mine': p('mine.wav'),
+            'charge': p('charge.wav'),
+            'heal': p('heal.wav'),
         }
-        
+
         for sound_name, file_path in sound_files.items():
             try:
                 if os.path.exists(file_path):
@@ -48,22 +51,21 @@ class SoundManager:
                     sound.set_volume(self.volume)
                     self.sounds[sound_name] = sound
                 else:
-                    # Create a simple beep sound as fallback
+                    print(f"Sound missing: {sound_name} -> {file_path} (using beep fallback)")
                     self.sounds[sound_name] = self._create_beep_sound(sound_name)
             except pygame.error as e:
-                print(f"Warning: Could not load sound {sound_name}: {e}")
+                print(f"Warning: Could not load sound {sound_name} from {file_path}: {e}")
                 self.sounds[sound_name] = self._create_beep_sound(sound_name)
     
     def _create_beep_sound(self, sound_type):
         """Create a simple beep sound as fallback"""
         if not self.mixer_available:
             return None
-            
+
         try:
-            # Try numpy first
             import numpy as np
-            
-            # Create different frequency beeps for different sound types
+            import math
+
             frequencies = {
                 'twinkle': 800,
                 'spell_cast': 600,
@@ -74,31 +76,29 @@ class SoundManager:
                 'charge': 500,
                 'heal': 700
             }
-            
+
             freq = frequencies.get(sound_type, 440)
             duration = 0.2
             sample_rate = 22050
             frames = int(duration * sample_rate)
-            
-            arr = np.zeros((frames, 2))
-            for i in range(frames):
-                wave = 4096 * np.sin(2 * np.pi * freq * i / sample_rate)
-                arr[i][0] = wave
-                arr[i][1] = wave
-            
-            sound = pygame.sndarray.make_sound(arr.astype(np.int16))
-            sound.set_volume(self.volume * 0.3)  # Quieter for beeps
+
+            t = np.arange(frames)
+            wave = (4096 * np.sin(2 * math.pi * freq * t / sample_rate)).astype(np.int16)
+            stereo = np.column_stack((wave, wave))
+
+            sound = pygame.sndarray.make_sound(stereo)
+            sound.set_volume(self.volume * 0.3)
             return sound
         except ImportError:
-            # Fallback: create simple procedural sound without numpy
             return self._create_simple_beep(sound_type)
-        except Exception:
+        except Exception as e:
+            print(f"Beep fallback error ({sound_type}): {e}")
             return None
     
     def _create_simple_beep(self, sound_type):
         """Create simple beep without numpy dependency"""
         try:
-            # Create different frequency beeps for different sound types
+            import array, math
             frequencies = {
                 'twinkle': 800,
                 'spell_cast': 600,
@@ -109,30 +109,28 @@ class SoundManager:
                 'charge': 500,
                 'heal': 700
             }
-            
             freq = frequencies.get(sound_type, 440)
             duration = 0.2
             sample_rate = 22050
             frames = int(duration * sample_rate)
-            
-            # Create simple sine wave using built-in math
-            import math
-            arr = []
-            for i in range(frames):
-                wave = int(4096 * math.sin(2 * math.pi * freq * i / sample_rate))
-                arr.append([wave, wave])  # Stereo
-            
-            sound = pygame.sndarray.make_sound(arr)
-            sound.set_volume(self.volume * 0.3)  # Quieter for beeps
-            return sound
-        except Exception:
+
+            mono = array.array('h', (int(4096 * math.sin(2 * math.pi * freq * i / sample_rate)) for i in range(frames)))
+            stereo = array.array('h')
+            for s in mono:
+                stereo.append(s); stereo.append(s)
+
+            snd = pygame.mixer.Sound(buffer=stereo.tobytes())
+            snd.set_volume(self.volume * 0.3)
+            return snd
+        except Exception as e:
+            print(f"Simple beep fallback error ({sound_type}): {e}")
             return None
     
     def play_sound(self, sound_name, volume_modifier=1.0):
         """Play a sound effect"""
         if not self.enabled or not self.mixer_available:
             return
-            
+    
         if sound_name in self.sounds and self.sounds[sound_name]:
             try:
                 sound = self.sounds[sound_name]

@@ -54,7 +54,7 @@ class StartScreen:
         }
         
         # Game state
-        self.setup_phase = 'player_count'  # 'player_count', 'player_setup', 'ready'
+        self.setup_phase = 'player_count'
         self.num_human_players = 2
         self.num_ai_players = 2
         self.player_setups = []
@@ -72,7 +72,7 @@ class StartScreen:
         # Debug mode
         self.debug_mode = False
         
-        # Play welcome sound
+        # Welcome sound
         sound_manager.play_twinkle()
         
         if self.debug_mode:
