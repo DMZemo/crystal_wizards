@@ -21,10 +21,12 @@ class PlayerSetup:
 class StartScreen:
     """Enhanced start screen with full player configuration"""
     
-    def __init__(self, screen_width=1200, screen_height=900):
-        self.screen_width = screen_width
-        self.screen_height = screen_height
-        self.screen = pygame.display.set_mode((screen_width, screen_height))
+    def __init__(self, screen_width=None, screen_height=None):
+        # Get full screen dimensions and create fullscreen window
+        info = pygame.display.Info()
+        self.screen_width = info.current_w
+        self.screen_height = info.current_h
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.FULLSCREEN)
         pygame.display.set_caption("Crystal Wizards - Enhanced Setup")
         
         # Initialize sound

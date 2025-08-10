@@ -1,4 +1,3 @@
-
 """
 Crystal Wizards - Main Game File
 A strategic board game where wizards collect crystals and cast spells to eliminate opponents.
@@ -22,13 +21,13 @@ def main():
         #user quit
         pygame.quit()
         return
-            
+    
     num_human_players = config['num_human_players']
     num_ai_players = config['num_ai_players']
     
     # Create and run the game
     try:
-        game = CrystalWizardsGame(num_players=num_human_players, num_ai=num_ai_players)
+        game = CrystalWizardsGame(num_players=num_human_players, num_ai=num_ai_players, players_config=config.get('players'))
         gui = GameGUI(game)
         gui.run()
     except Exception as e:
@@ -36,8 +35,8 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
-        pygame.quit()
-        sys.exit(0)
+            pygame.quit()
+            sys.exit(0)
 
 if __name__ == "__main__":
     main()
