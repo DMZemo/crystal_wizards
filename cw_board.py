@@ -199,6 +199,9 @@ class GameBoard:
         for i in range(12):
             self.white_crystals[f'hex_{i}'] = 1
 
+    def get_all_positions(self):
+        return list(self.positions.keys())
+
     def get_adjacent_positions(self, position):
         return self.layout.get_connections(position)
 

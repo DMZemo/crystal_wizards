@@ -550,7 +550,7 @@ class StartScreen:
         
         # Color selection - Centered
         color_label = self.font_medium.render("Choose Color:", True, self.colors['white'])
-        color_label_rect = color_label.get_rect(center=(center_x, content_y + 200))
+        color_label_rect = color_label.get_rect(center=(center_x, content_y + 300))
         self.screen.blit(color_label, color_label_rect)
         
         for key, button in self.buttons.items():
@@ -570,7 +570,7 @@ class StartScreen:
         # AI difficulty selection - Centered
         if current_setup.is_ai:
             diff_label = self.font_medium.render("AI Difficulty:", True, self.colors['white'])
-            diff_label_rect = diff_label.get_rect(center=(center_x, content_y + 300))
+            diff_label_rect = diff_label.get_rect(center=(center_x, content_y + 400))
             self.screen.blit(diff_label, diff_label_rect)
             
             for key, button in self.buttons.items():
