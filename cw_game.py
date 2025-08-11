@@ -7,6 +7,7 @@ import random
 import collections
 from cw_entities import Wizard, AIWizard, SpellCard, SpellCardDeck, Crystal
 from cw_board import GameBoard
+from cw_ai import AIManager
 
 class CrystalWizardsGame:
     def __init__(self, num_players=2, num_ai=0, players_config=None):
@@ -49,9 +50,11 @@ class CrystalWizardsGame:
                 name = p.get('username')
                 is_ai = p.get('is_ai')
                 if is_ai:
-                    player = AIWizard(color, health=6)
-                    # Optional: if AI difficulty is part of AIWizard, pass or set it here
-                    # player.difficulty = p.get('difficulty')
+                    difficulty = p.get('difficulty', 'easy')
+                    player = AIWizard(color, health=6, difficulty=difficulty)
+                    # Set up the AI controller based on difficulty
+                    ai_controller = AIManager.create_ai(player, difficulty)
+                    player.set_ai_controller(ai_controller)
                 else:
                     player = Wizard(color, health=6)
                 # If Wizard supports a name attribute, set it
@@ -67,9 +70,11 @@ class CrystalWizardsGame:
             for i in range(self.num_players):
                 wizard = Wizard(colors[i], health=6)
                 self.players.append(wizard)
-            # Create AI players
+            # Create AI players with default medium difficulty
             for i in range(self.num_ai):
-                ai_wizard = AIWizard(colors[self.num_players + i], health=6)
+                ai_wizard = AIWizard(colors[self.num_players + i], health=6, difficulty='medium')
+                ai_controller = AIManager.create_ai(ai_wizard, 'medium')
+                ai_wizard.set_ai_controller(ai_controller)
                 self.players.append(ai_wizard)
         
         # Initialize board and place wizards
@@ -286,36 +291,12 @@ class CrystalWizardsGame:
         self.action_log.append(f"--- {current_player_name}'s turn ends. {next_player_name}'s turn begins. ---")
         
     def execute_ai_turn(self, ai_player):
-        """Execute AI player's turn with simple strategy"""
-        while self.current_actions < self.max_actions_per_turn:
-            action_taken = False
-            
-            if self.can_cast_spell(ai_player):
-                for spell_card in ai_player.cards_laid_down:
-                    if spell_card.is_fully_charged():
-                        adjacent_enemies = self.get_adjacent_enemies(ai_player)
-                        if adjacent_enemies:
-                            self.cast_spell(ai_player, spell_card)
-                            action_taken = True
-                            break
-                if action_taken: continue
-            
-            if self.can_mine(ai_player):
-                if self.should_ai_mine(ai_player):
-                    if self.board.has_crystals_at_position(ai_player.location) and not self.board.is_mine(ai_player.location) and not self.board.is_healing_springs(ai_player.location):
-                        self.mine_white_crystal(ai_player, ai_player.location)
-                        action_taken = True
-                if action_taken: continue
-
-            if self.can_move(ai_player):
-                target_position = self.get_ai_move_target(ai_player)
-                if target_position:
-                    self.move_player(ai_player, target_position)
-                    action_taken = True
-            
-            if not action_taken:
-                break
-        
+        """Execute AI player's turn using the new strategic AI system"""
+        if isinstance(ai_player, AIWizard):
+            ai_player.execute_turn(self)
+        else:
+            # Fallback for non-AI players (should not happen)
+            return
     def get_adjacent_enemies(self, player):
         """Get list of enemy wizards adjacent to the player"""
         adjacent_positions = self.board.get_adjacent_positions(player.location)
@@ -328,52 +309,11 @@ class CrystalWizardsGame:
                         enemies.append(wizard)
         return enemies
         
-    def should_ai_mine(self, ai_player):
-        """Determine if AI should mine at current location"""
-        position = ai_player.location
+
         
-        if self.board.is_healing_springs(position) and ai_player.health < 4:
-            return True
+
         
-        if self.board.has_crystals_at_position(position) and ai_player.get_total_crystals() < 5:
-            return True
-        
-        return False
-        
-    def get_ai_move_target(self, ai_player):
-        """Get the best move target for AI player"""
-        current_pos = ai_player.location
-        adjacent_positions = self.board.get_adjacent_positions(current_pos)
-        
-        best_target = None
-        best_score = -1
-        
-        for pos in adjacent_positions:
-            score = self.evaluate_position_for_ai(pos, ai_player)
-            if score > best_score:
-                best_score = score
-                best_target = pos
-        
-        return best_target
-        
-    def evaluate_position_for_ai(self, position, ai_player):
-        """Evaluate how good a position is for the AI player"""
-        score = 0
-        
-        if self.board.has_crystals_at_position(position):
-            score += 10
-        
-        if ai_player.health < 3:
-            if self.board.is_healing_springs(position):
-                score += 20
-            elif self.board.distance_to_healing_springs(position) < 3:
-                score += 5
-        
-        adjacent_enemies = len(self.get_adjacent_enemies_at_position(position, ai_player))
-        if adjacent_enemies > 0 and ai_player.has_charged_spells():
-            score += 15 * adjacent_enemies
-        
-        return score
+
         
     def get_adjacent_enemies_at_position(self, position, player):
         """Get enemies that would be adjacent if player moved to position"""

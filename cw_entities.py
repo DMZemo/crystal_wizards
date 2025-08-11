@@ -169,83 +169,95 @@ class Wizard:
 class AIWizard(Wizard):
     """AI-controlled wizard with simple strategic behavior"""
     
-    def __init__(self, color, health=6):
+    def __init__(self, color, health=6, difficulty='easy'):
         super().__init__(color, health)
-        self.strategy = 'balanced'  # Could be 'aggressive', 'defensive', 'balanced'
+        self.difficulty = difficulty
+        self.ai_controller = None  # Will be set by AIManager
 
-    
-    def should_lay_down_card(self):
-        """Determine if AI should lay down a spell card"""
-        # Lay down cards if we have crystals to charge them
-        total_crystals = self.get_total_crystals()
-        return total_crystals >= 2 and len(self.cards_laid_down) < 2
-    
-    def choose_card_to_lay_down(self):
-        """Choose which card to lay down from hand"""
-        if not self.hand:
-            return None
         
-        # Prefer lower cost cards that we can afford
-        affordable_cards = []
-        for card in self.hand:
-            if self.can_afford_card(card):
-                affordable_cards.append(card)
+    def set_ai_controller(self, ai_controller):
+        """Set the AI controller that manages this wizard"""
+        self.ai_controller = ai_controller
         
-        if affordable_cards:
-            return self.hand.index(min(affordable_cards, key=lambda c: c.get_total_cost()))
+    def execute_turn(self, game):
+        """Execute the AI's turn using the strategic AI controller"""
+        if self.ai_controller:
+            self.ai_controller.execute_turn(game)
         else:
-            return 0  # Just lay down first card if none are affordable
+            # Fallback to basic behavior if no controller is set
+            self._basic_ai_turn(game)
     
-    def can_afford_card(self, card):
-        """Check if AI can afford to charge a spell card"""
-        total_cost = card.get_total_cost()
-        total_crystals = self.get_total_crystals()
-        return total_crystals >= total_cost
+    def _basic_ai_turn(self, game):
+        """Basic AI behavior as fallback"""
+        # This is the old simple logic as a safety net
+        while game.current_actions < game.max_actions_per_turn:
+            action_taken = False
+            
+            # Try to cast spells first
+            if game.can_cast_spell(self):
+                for spell_card in self.cards_laid_down:
+                    if spell_card.is_fully_charged():
+                        adjacent_enemies = game.get_adjacent_enemies(self)
+                        if adjacent_enemies:
+                            game.cast_spell(self, spell_card)
+                            action_taken = True
+                            break
+                if action_taken: 
+                    continue
+            
+            # Try to mine
+            if game.can_mine(self):
+                pos = self.location
+                if game.board.has_crystals_at_position(pos) and not game.board.is_mine(pos) and not game.board.is_healing_springs(pos):
+                    game.mine_white_crystal(self, pos)
+                    action_taken = True
+                elif game.board.is_healing_springs(pos) and self.health < 4:
+                    roll = random.randint(1, 3)
+                    game.resolve_mine_with_roll(self, pos, roll)
+                    action_taken = True
+                elif game.board.is_mine(pos) and self.get_total_crystals() < 5:
+                    roll = random.randint(1, 6)
+                    game.resolve_mine_with_roll(self, pos, roll)
+                    action_taken = True
+                if action_taken:
+                    continue
+            
+            # Try to move
+            if game.can_move(self):
+                target_position = self._get_simple_move_target(game)
+                if target_position:
+                    game.move_player(self, target_position)
+                    action_taken = True
+            
+            if not action_taken:
+                break
     
-    def choose_spell_to_cast(self):
-        """Choose a spell to cast based on current situation"""
-        if not self.cards_laid_down:
-            return None
+    def _get_simple_move_target(self, game):
+        """Simple movement logic for fallback AI"""
+        current_pos = self.location
+        adjacent_positions = game.board.get_adjacent_positions(current_pos)
         
-        # Prefer casting fully charged spells
-        for i, card in enumerate(self.cards_laid_down):
-            if card.is_fully_charged():
-                return i
-    
-    def choose_target(self, players):
-        """Choose a target player to attack"""
-        # Simple strategy: target the player with the lowest health
-        target = min(players, key=lambda p: p.health)
-        return target if target != self else None
-    
-    def decide_action(self, players):
-        """Decide what action to take this turn"""
-        if self.should_lay_down_card():
-            card_index = self.choose_card_to_lay_down()
-            if card_index is not None:
-                return ('lay_down', card_index)
+        best_target = None
+        best_score = -1
         
-        spell_index = self.choose_spell_to_cast()
-        if spell_index is not None:
-            target = self.choose_target(players)
-            if target:
-                return ('cast_spell', spell_index, target)
+        for pos in adjacent_positions:
+            score = 0
+            
+            if game.board.has_crystals_at_position(pos):
+                score += 10
+            
+            if self.health < 3 and game.board.is_healing_springs(pos):
+                score += 20
+            
+            adjacent_enemies = len(game.get_adjacent_enemies_at_position(pos, self))
+            if adjacent_enemies > 0 and self.has_charged_spells():
+                score += 15 * adjacent_enemies
+            
+            if score > best_score:
+                best_score = score
+                best_target = pos
         
-        # Default action: do nothing or move
-        return ('move', None)
-    
-    def perform_action(self, action, players):
-        """Perform the chosen action"""
-        if action[0] == 'lay_down':
-            self.lay_down_spell_card(action[1])
-        elif action[0] == 'cast_spell':
-            spell_index = action[1]
-            target = action[2]
-            spell_card = self.cards_laid_down[spell_index]
-            if spell_card.is_fully_charged():
-                damage = spell_card.get_damage()
-                target.take_damage(damage, gui=None, caster=self)  # AI casting has no GUI access
-                self.cards_laid_down.remove(spell_card)
+        return best_target
 
 
 
@@ -320,15 +332,17 @@ class SpellCardDeck:
     
     def initialize_deck(self):
         """Create the standard spell card deck with wild instead of white"""
+        # 32 spell cards total
+        
         # 2-damage spells (cost 2: 1 color + 1 wildcard)
-        for _ in range(8):
+        for _ in range(2):  # 2 cards of each color
             self.cards.append(SpellCard({'red': 1, 'wild': 1}))
             self.cards.append(SpellCard({'blue': 1, 'wild': 1}))
             self.cards.append(SpellCard({'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'yellow': 1, 'wild': 1}))
 
         # 3-damage spells (cost 3: 2 colors + 1 wildcard)
-        for _ in range(6):
+        for _ in range(2): # 2 cards of each color combination
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'yellow': 1, 'wild': 1}))
@@ -337,15 +351,17 @@ class SpellCardDeck:
             self.cards.append(SpellCard({'green': 1, 'yellow': 1, 'wild': 1}))
 
         # 4-damage spells (cost 4: 3 colors + 1 wildcard)
-        for _ in range(4):
+        for _ in range(2): # 2 card of each color combination
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'yellow': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'green': 1, 'yellow': 1, 'wild': 1}))
             self.cards.append(SpellCard({'blue': 1, 'green': 1, 'yellow': 1, 'wild': 1}))
 
         # 5-damage spells (cost 5: all 4 colors + 1 wildcard)
-        for _ in range(2):
+        for _ in range(4): # 4 cards of each color combination
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'green': 1, 'yellow': 1, 'wild': 1}))
+
+        
     
     def shuffle(self):
         """Shuffle the deck"""
