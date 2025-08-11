@@ -29,7 +29,8 @@ COLORS = {
     'brown': (139, 69, 19),
     'light_blue': (173, 216, 230),
     'gold': (255, 215, 0),
-    'wild': (230, 50, 230)
+    'wild': (230, 50, 230),
+    'transparent': (0, 0, 0, 0)  # For transparent surfaces
 }
 
 
@@ -165,9 +166,12 @@ class GameGUI:
         self.position_coords = {}
         self.calculate_position_coordinates()
 
-        # Spell card fan layout state
+        # Spell card horizontal row layout state
         self.spell_card_rects = []
         self.visible_hand = []
+        self.hovered_card_index = None
+        self.selected_card_index = None
+        self.mouse_pos = (0, 0)
 
         # Quit dialog
         self.quit_dialog = QuitConfirmDialog(self.screen, self.font_large)
@@ -636,6 +640,7 @@ class GameGUI:
         self.draw_player_info()
         self.action_panel.draw(self.screen)
         self.draw_spell_cards_fan()
+        self.draw_opponent_cards_area()
         self.draw_game_status_panel()
 
     def draw_turn_indicator(self):
@@ -702,7 +707,7 @@ class GameGUI:
         self.screen.blit(text, (info_x + 10, y_offset))
 
     def draw_spell_cards_fan(self):
-        """Draw spell cards in a fan layout"""
+        """Draw spell cards in a horizontal row layout with professional styling"""
         current_player = self.game.get_current_player()
         self.spell_card_rects = []
 
@@ -710,73 +715,131 @@ class GameGUI:
         if not all_cards:
             return
 
-        fan_center_x = int(self.screen_width * 0.85)
-        fan_center_y = int(self.screen_height * 0.95)
-        fan_radius = int(self.screen_height * 0.30)
+        # Update mouse position for hover detection
+        self.mouse_pos = pygame.mouse.get_pos()
 
-        card_width = int(self.screen_width * 0.12)
-        card_height = int(self.screen_height * 0.30)
+        # Card dimensions and positioning
+        base_card_width = int(self.screen_width * 0.10)
+        base_card_height = int(self.screen_height * 0.25)
+        hover_scale = 1.3
+        card_spacing = base_card_width + 15
+        
+        # Horizontal row positioning
+        total_width = len(all_cards) * card_spacing - 15
+        start_x = self.screen_width - total_width - 20
+        
+        # Hand cards in bottom row, laid down cards in upper row
+        hand_y = self.screen_height - base_card_height - 10
+        board_y = hand_y - int(base_card_height * 0.7)
+        
+        self.hovered_card_index = None
 
-        visible_cards = all_cards[:3]
-        angle_spread = 23
-
-        for i, card in enumerate(visible_cards):
-            if len(visible_cards) == 1:
-                angle = 0
-            else:
-                angle = -angle_spread + (i * (2 * angle_spread) / (len(visible_cards) - 1))
-
-            angle_rad = math.radians(angle - 90)
-            card_x = fan_center_x + int(fan_radius * math.cos(angle_rad))
-            card_y = fan_center_y + int(fan_radius * math.sin(angle_rad))
-
-            is_in_hand = i < len(current_player.hand)
-            is_selected = (not is_in_hand and card == self.selected_spell_card)
-
-            if is_in_hand:
-                is_selected = False
-            else:
-                is_selected = (card == self.selected_spell_card)
-
-            self.draw_spell_card_in_fan(
-                card, card_x, card_y, card_width, card_height,
-                angle, is_in_hand, is_selected, current_player
+        # Draw hand cards (bottom row)
+        for i, card in enumerate(current_player.hand):
+            card_x = start_x + i * card_spacing
+            card_y = hand_y
+            is_hovered = self._is_card_hovered(card_x, card_y, base_card_width, base_card_height, i)
+            
+            if is_hovered:
+                self.hovered_card_index = i
+                
+            self.draw_spell_card_horizontal(
+                card, card_x, card_y, base_card_width, base_card_height,
+                True, False, is_hovered, current_player, i
             )
 
-    def draw_spell_card_in_fan(self, card, x, y, width, height, rotation_angle,
-                               is_in_hand, is_selected, current_player):
-        """Draw a single spell card in the fan layout with rotation"""
-        card_surface = pygame.Surface((width, height))
+        # Draw laid down cards (upper row)  
+        for i, card in enumerate(current_player.cards_laid_down):
+            card_x = start_x + i * card_spacing
+            card_y = board_y
+            card_index = len(current_player.hand) + i
+            is_hovered = self._is_card_hovered(card_x, card_y, base_card_width, base_card_height, card_index)
+            is_selected = (card == self.selected_spell_card)
+            
+            if is_hovered:
+                self.hovered_card_index = card_index
+                
+            self.draw_spell_card_horizontal(
+                card, card_x, card_y, base_card_width, base_card_height,
+                False, is_selected, is_hovered, current_player, card_index
+            )
 
+    def _is_card_hovered(self, card_x, card_y, card_width, card_height, card_index):
+        """Check if mouse is hovering over a card"""
+        mx, my = self.mouse_pos
+        return (card_x <= mx <= card_x + card_width and 
+                card_y <= my <= card_y + card_height)
+
+    def draw_spell_card_horizontal(self, card, x, y, base_width, base_height,
+                                 is_in_hand, is_selected, is_hovered, current_player, card_index):
+        """Draw a single spell card in horizontal layout with professional styling"""
+        
+        # Apply hover scaling
+        if is_hovered:
+            width = int(base_width * 1.3)
+            height = int(base_height * 1.3)
+            # Adjust position to keep card centered when scaled
+            adjusted_x = x - (width - base_width) // 2
+            adjusted_y = y - (height - base_height) // 2
+        else:
+            width = base_width
+            height = base_height
+            adjusted_x = x
+            adjusted_y = y
+
+        # Draw shadow first (professional effect)
+        shadow_offset = 3
+        shadow_surface = pygame.Surface((width + shadow_offset * 2, height + shadow_offset * 2), pygame.SRCALPHA)
+        shadow_color = (0, 0, 0, 60)  # Semi-transparent black
+        pygame.draw.rect(shadow_surface, shadow_color, 
+                        (shadow_offset, shadow_offset, width, height), border_radius=8)
+        self.screen.blit(shadow_surface, (adjusted_x - shadow_offset, adjusted_y - shadow_offset))
+
+        # Create card surface
+        card_surface = pygame.Surface((width, height), pygame.SRCALPHA)
+
+        # Card background colors
         if is_selected:
             card_color = COLORS['gold']
+        elif is_hovered:
+            card_color = (255, 255, 240)  # Light cream color for hover
         elif is_in_hand:
             card_color = COLORS['white']
         else:
             card_color = COLORS['light_blue']
 
-        card_surface.fill(card_color)
+        # Draw card background with rounded corners
+        pygame.draw.rect(card_surface, card_color, (0, 0, width, height), border_radius=8)
 
-        border_color = COLORS['black']
-        if is_selected:
-            border_color = COLORS['gold']
-        pygame.draw.rect(card_surface, border_color, (0, 0, width, height), 3)
+        # Card border
+        border_color = COLORS['gold'] if is_selected else COLORS['black']
+        border_width = 4 if is_selected else 2
+        pygame.draw.rect(card_surface, border_color, (0, 0, width, height), border_width, border_radius=8)
 
-        damage_text = pygame.font.Font(None, int(height * 0.2)).render(str(card.get_damage()), True, COLORS['black'])
-        damage_rect = damage_text.get_rect(center=(width // 2, height // 6))
+        # Draw damage number at top center
+        damage_font_size = int(height * 0.15)
+        damage_font = pygame.font.Font(None, damage_font_size)
+        damage_text = damage_font.render(str(card.get_damage()), True, COLORS['black'])
+        damage_rect = damage_text.get_rect(center=(width // 2, damage_font_size // 2 + 10))
         card_surface.blit(damage_text, damage_rect)
 
+        # Draw crystal costs (always visible, no rotation)
         y_offset = height // 3
-        crystal_size = max(8, int(width * 0.15))
-        font_size = max(12, int(width * 0.2))
+        crystal_size = max(6, int(width * 0.08))
+        font_size = max(10, int(width * 0.15))
         cost_font = pygame.font.Font(None, font_size)
 
         for color, cost in card.cost.items():
             if cost > 0:
                 crystal_x = width // 4
-                pygame.draw.circle(card_surface, COLORS.get(color, COLORS['wild']), (crystal_x, y_offset), crystal_size)
-                pygame.draw.circle(card_surface, COLORS['black'], (crystal_x, y_offset), crystal_size, 2)
+                
+                # Draw crystal circle
+                pygame.draw.circle(card_surface, COLORS.get(color, COLORS['wild']), 
+                                 (crystal_x, y_offset), crystal_size)
+                pygame.draw.circle(card_surface, COLORS['black'], 
+                                 (crystal_x, y_offset), crystal_size, 2)
 
+                # Draw crystal cost/progress text
                 if not is_in_hand:
                     placed = card.crystals_used.get(color, 0)
                     progress_text = f"{placed}/{cost}"
@@ -787,30 +850,38 @@ class GameGUI:
 
                 cost_text = cost_font.render(progress_text, True, text_color)
                 card_surface.blit(cost_text, (crystal_x + crystal_size + 5, y_offset - font_size // 2))
-                y_offset += crystal_size * 2 + 5
+                y_offset += crystal_size * 2 + 8
 
+        # Draw charging progress bar for laid down cards
         if not is_in_hand:
             progress = card.get_charging_progress()
-            bar_y = height - 20
+            bar_y = height - 25
             bar_width = width - 10
-            bar_height = 6
-            pygame.draw.rect(card_surface, COLORS['grey'], (5, bar_y, bar_width, bar_height))
+            bar_height = 8
+            
+            # Background bar
+            pygame.draw.rect(card_surface, COLORS['grey'], (5, bar_y, bar_width, bar_height), border_radius=4)
+            
+            # Progress bar
             progress_width = int(bar_width * progress)
             bar_color = COLORS['green'] if progress >= 1.0 else COLORS['yellow']
-            pygame.draw.rect(card_surface, bar_color, (5, bar_y, progress_width, bar_height))
+            if progress_width > 0:
+                pygame.draw.rect(card_surface, bar_color, (5, bar_y, progress_width, bar_height), border_radius=4)
+            
+            # Progress percentage
             progress_text = f"{int(progress * 100)}%"
             progress_surface = self.font_small.render(progress_text, True, COLORS['black'])
-            card_surface.blit(progress_surface, (5, bar_y - 15))
+            card_surface.blit(progress_surface, (5, bar_y - 18))
 
-        if rotation_angle != 0:
-            card_surface = pygame.transform.rotate(card_surface, rotation_angle)
-
-        final_rect = card_surface.get_rect(center=(x, y))
-        click_rect = pygame.Rect(x - width // 2, y - height // 2, width, height)
+        # Store click detection rectangle (use original position for consistent clicking)
+        click_rect = pygame.Rect(x, y, base_width, base_height)
         self.spell_card_rects.append(click_rect)
-        self.screen.blit(card_surface, final_rect)
 
-        if self.selected_spell_card:
+        # Blit the card to screen
+        self.screen.blit(card_surface, (adjusted_x, adjusted_y))
+
+        # Draw crystal placement UI if this card is selected
+        if self.selected_spell_card and card == self.selected_spell_card:
             self.draw_crystal_placement_ui(current_player)
 
     def draw_crystal_placement_ui(self, current_player):
@@ -836,6 +907,162 @@ class GameGUI:
                 text_color = COLORS['green'] if placed >= required else COLORS['black']
                 progress_surface = self.font_small.render(progress_text, True, text_color)
                 self.screen.blit(progress_surface, (x, y + 35))
+
+    def draw_opponent_cards_area(self):
+        """Draw opponent players' laid down cards in a compact format on the left side"""
+        current_player = self.game.get_current_player()
+        
+        # Get all opponents (players other than current player)
+        opponents = [player for player in self.game.players if player != current_player]
+        
+        if not opponents:
+            return
+            
+        # Define the opponent area dimensions
+        area_width = int(self.screen_width * 0.25)  # 25% of screen width
+        area_x = 10  # Left margin
+        area_y = 70   # Start below turn indicator
+        max_area_height = int(self.screen_height * 0.7)  # Max 70% of screen height
+        
+        # Calculate space per opponent
+        opponent_height = min(max_area_height // len(opponents), 200)
+        
+        for i, opponent in enumerate(opponents):
+            opponent_y = area_y + i * (opponent_height + 10)
+            
+            # Draw opponent section background
+            section_rect = pygame.Rect(area_x, opponent_y, area_width, opponent_height)
+            pygame.draw.rect(self.screen, COLORS['white'], section_rect)
+            pygame.draw.rect(self.screen, COLORS['black'], section_rect, 2)
+            
+            # Draw opponent name/color header
+            header_height = 30
+            header_rect = pygame.Rect(area_x, opponent_y, area_width, header_height)
+            opponent_color = COLORS.get(opponent.color, COLORS['black'])
+            pygame.draw.rect(self.screen, opponent_color, header_rect)
+            pygame.draw.rect(self.screen, COLORS['black'], header_rect, 2)
+            
+            # Opponent name text
+            opponent_name = self.display_name(opponent)
+            name_font = pygame.font.Font(None, 18)
+            name_text = name_font.render(opponent_name, True, COLORS['white'])
+            name_rect = name_text.get_rect(center=(area_x + area_width // 2, opponent_y + header_height // 2))
+            self.screen.blit(name_text, name_rect)
+            
+            # Draw opponent's laid down cards
+            if opponent.cards_laid_down:
+                cards_area_y = opponent_y + header_height + 5
+                cards_area_height = opponent_height - header_height - 10
+                
+                self.draw_opponent_cards_compact(opponent, area_x + 5, cards_area_y, 
+                                                area_width - 10, cards_area_height)
+            else:
+                # Show "No cards played" message
+                no_cards_text = self.font_small.render("No cards played", True, COLORS['dark_grey'])
+                text_rect = no_cards_text.get_rect(center=(area_x + area_width // 2, 
+                                                          opponent_y + header_height + 20))
+                self.screen.blit(no_cards_text, text_rect)
+
+    def draw_opponent_cards_compact(self, opponent, x, y, width, height):
+        """Draw opponent's cards in a compact grid layout"""
+        cards = opponent.cards_laid_down
+        if not cards:
+            return
+            
+        # Calculate card dimensions (smaller than main player cards)
+        cards_per_row = min(3, len(cards))  # Max 3 cards per row
+        rows_needed = (len(cards) + cards_per_row - 1) // cards_per_row
+        
+        card_width = min((width - 10) // cards_per_row - 5, 80)  # Compact size
+        card_height = min(height // rows_needed - 5, 120)  # Compact size
+        
+        for i, card in enumerate(cards):
+            row = i // cards_per_row
+            col = i % cards_per_row
+            
+            # Calculate card position
+            cards_in_row = min(cards_per_row, len(cards) - row * cards_per_row)
+            row_width = cards_in_row * (card_width + 5) - 5
+            start_x = x + (width - row_width) // 2  # Center the row
+            
+            card_x = start_x + col * (card_width + 5)
+            card_y = y + row * (card_height + 5)
+            
+            self.draw_compact_spell_card(card, card_x, card_y, card_width, card_height)
+
+    def draw_compact_spell_card(self, card, x, y, width, height):
+        """Draw a single spell card in compact format"""
+        # Create card surface
+        card_surface = pygame.Surface((width, height))
+        
+        # Determine card color based on charging status
+        progress = card.get_charging_progress()
+        if progress >= 1.0:
+            card_color = COLORS['light_blue']  # Fully charged
+        else:
+            card_color = COLORS['white']  # Still charging
+            
+        card_surface.fill(card_color)
+        
+        # Draw border
+        border_color = COLORS['green'] if progress >= 1.0 else COLORS['black']
+        border_width = 2 if progress >= 1.0 else 1
+        pygame.draw.rect(card_surface, border_color, (0, 0, width, height), border_width)
+        
+        # Draw damage value at top
+        damage_font = pygame.font.Font(None, max(16, int(height * 0.15)))
+        damage_text = damage_font.render(str(card.get_damage()), True, COLORS['black'])
+        damage_rect = damage_text.get_rect(center=(width // 2, height // 8))
+        card_surface.blit(damage_text, damage_rect)
+        
+        # Draw crystal costs
+        y_offset = height // 4
+        crystal_size = max(4, int(width * 0.08))
+        cost_font_size = max(10, int(width * 0.15))
+        cost_font = pygame.font.Font(None, cost_font_size)
+        
+        for color, cost in card.cost.items():
+            if cost > 0:
+                crystal_x = width // 6
+                
+                # Draw crystal circle
+                pygame.draw.circle(card_surface, COLORS.get(color, COLORS['wild']), 
+                                 (crystal_x, y_offset), crystal_size)
+                pygame.draw.circle(card_surface, COLORS['black'], 
+                                 (crystal_x, y_offset), crystal_size, 1)
+                
+                # Show progress (placed/required)
+                placed = card.crystals_used.get(color, 0)
+                progress_text = f"{placed}/{cost}"
+                text_color = COLORS['green'] if placed >= cost else COLORS['red']
+                
+                cost_text = cost_font.render(progress_text, True, text_color)
+                card_surface.blit(cost_text, (crystal_x + crystal_size + 2, 
+                                            y_offset - cost_font_size // 2))
+                y_offset += crystal_size * 2 + 2
+        
+        # Draw charging progress bar at bottom
+        bar_height = max(3, int(height * 0.05))
+        bar_y = height - bar_height - 2
+        bar_width = width - 4
+        
+        # Background bar
+        pygame.draw.rect(card_surface, COLORS['grey'], (2, bar_y, bar_width, bar_height))
+        
+        # Progress bar
+        progress_width = int(bar_width * progress)
+        bar_color = COLORS['green'] if progress >= 1.0 else COLORS['yellow']
+        pygame.draw.rect(card_surface, bar_color, (2, bar_y, progress_width, bar_height))
+        
+        # Progress percentage text (very small)
+        if height > 60:  # Only show percentage if card is tall enough
+            progress_text = f"{int(progress * 100)}%"
+            progress_font = pygame.font.Font(None, max(8, int(height * 0.08)))
+            progress_surface = progress_font.render(progress_text, True, COLORS['black'])
+            card_surface.blit(progress_surface, (2, bar_y - 12))
+        
+        # Blit the card to screen
+        self.screen.blit(card_surface, (x, y))
 
     def draw_game_status_panel(self):
         """Draw the ticker tape and all player statuses at the bottom."""
