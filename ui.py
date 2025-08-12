@@ -197,8 +197,18 @@ class ActionPanel:
             "End Turn", font, normal_color=(200, 200, 100)
         )
         
+        # AI Failsafe button - only visible during AI turns
+        self.ai_failsafe_button = Button(
+            x + 2 * (self.button_width + self.button_spacing), button_row_2_y,
+            self.button_width, self.button_height,
+            "AI Failsafe", font, normal_color=(200, 100, 100)
+        )
+        self.ai_failsafe_button.enabled = False  # Hidden by default
+
         self.buttons = [self.move_button, self.mine_button, self.cast_button, self.end_turn_button]
         self.selected_action = None
+
+        
         
     def handle_event(self, event, game):
         """Handle events for all buttons and return the action taken"""
@@ -234,6 +244,10 @@ class ActionPanel:
         for button in self.buttons:
             button.draw(screen)
             
+        # Draw AI failsafe button if enabled
+        if self.ai_failsafe_button.enabled:
+            self.ai_failsafe_button.draw(screen)
+        
         # Draw selection indicator
         if self.selected_action == 'move':
             pygame.draw.rect(screen, (0, 255, 0), self.move_button.rect, 3)
@@ -241,3 +255,25 @@ class ActionPanel:
             pygame.draw.rect(screen, (0, 0, 255), self.mine_button.rect, 3)
         elif self.selected_action == 'cast':
             pygame.draw.rect(screen, (255, 0, 0), self.cast_button.rect, 3)
+
+    def handle_ai_event(self, event):
+        """Handle AI-related events and return action if failsafe is triggered"""
+        # Only process events if AI failsafe button is enabled (during AI turns)
+        if not self.ai_failsafe_button.enabled:
+            return None
+            
+        # Check if AI failsafe button was clicked
+        if self.ai_failsafe_button.handle_event(event):
+            return 'ai_failsafe'
+            
+        return None
+    
+    def set_ai_turn_state(self, is_ai_turn):
+        """Enable/disable AI failsafe button based on whether it's an AI turn"""
+        self.ai_failsafe_button.enabled = is_ai_turn
+
+    def draw_ai_buttons(self, surface):
+        """Draw AI-specific buttons when it's an AI player's turn"""
+        # Draw the AI failsafe button if enabled
+        if self.ai_failsafe_button.enabled:
+            self.ai_failsafe_button.draw(surface)

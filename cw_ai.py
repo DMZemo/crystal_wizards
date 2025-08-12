@@ -66,6 +66,13 @@ class SafeAI:
         preferences.pop(self.wizard.color, None)  # Remove duplicate
         return preferences
     
+    def reset_state(self):
+        """Reset AI state to clear any issues that might cause freezing"""
+        self.fallback_used = False
+        self.last_action_type = None
+        self.resource_preference = self._init_resource_preference()
+        logger.info(f"AI state reset for {self.wizard.color} wizard")
+
     def execute_turn(self, game):
         """
         Main entry point - execute AI turn with timeout protection.
@@ -95,34 +102,53 @@ class SafeAI:
         """Execute the actual turn logic with time monitoring"""
         action_count = 0
         max_actions = min(3, game.max_actions_per_turn)
+        # BUGFIX: Add iteration counter to prevent infinite loops with free actions
+        iteration_count = 0
+        max_iterations = 10  # Prevent infinite loops (3 real actions + up to 7 free actions)
         
-        while game.current_actions < game.max_actions_per_turn and action_count < max_actions:
+        while (game.current_actions < game.max_actions_per_turn and 
+               action_count < max_actions and 
+               iteration_count < max_iterations):
             # Check time limit before each action
             if time.time() - start_time > self.max_thinking_time:
                 logger.debug(f"AI {self.wizard.color} hit time limit")
                 self._quick_fallback_action(game)
                 break
             
-            action_taken = self._choose_and_execute_action(game)
+            action_taken, action_type = self._choose_and_execute_action(game)
             if not action_taken:
                 break
+            
+            iteration_count += 1  # BUGFIX: Always increment iteration counter
                 
-            action_count += 1
+            # Only count actions that consume from the game's action limit
+            if not self._is_free_action(action_type):
+                action_count += 1
+                
+        # BUGFIX: Log if we hit iteration limit to help debug any remaining issues
+        if iteration_count >= max_iterations:
+            logger.debug(f"AI {self.wizard.color} hit iteration limit ({max_iterations})")
+            
+        # BUGFIX: Ensure the AI always makes at least one action if it has no valid actions
+        if iteration_count == 0:
+            logger.debug(f"AI {self.wizard.color} found no valid actions, using emergency fallback")
+            self._quick_fallback_action(game)
     
     def _choose_and_execute_action(self, game):
         """Choose and execute the best available action"""
         # Get all possible actions
         possible_actions = self._get_possible_actions(game)
         if not possible_actions:
-            return False
+            return False, None
         
         # Score and choose best action
         best_action = self._select_best_action(possible_actions, game)
         if not best_action:
-            return False
+            return False, None
         
         # Execute the chosen action
-        return self._execute_action(best_action, game)
+        success = self._execute_action(best_action, game)
+        return success, best_action['type'] if success else None
     
     def _get_possible_actions(self, game):
         """Get all currently possible actions"""
@@ -205,10 +231,15 @@ class SafeAI:
             if not card.is_fully_charged():
                 for color in ['red', 'blue', 'green', 'yellow', 'white']:
                     if self.wizard.crystals[color] > 0:
-                        # Test if this crystal can charge the card
+                        # Test if this crystal can charge the card without contaminating state
                         temp_crystals = self.wizard.crystals.copy()
+                        temp_crystals_used = card.crystals_used.copy()
+                        
                         can_charge = card.add_crystals(color, 1, self.wizard)
-                        self.wizard.crystals = temp_crystals  # Restore
+                        
+                        # Restore both wizard crystals AND card crystals_used state
+                        self.wizard.crystals = temp_crystals
+                        card.crystals_used = temp_crystals_used
                         
                         if can_charge:
                             charging_value = self._evaluate_charging(card, color)
@@ -342,6 +373,10 @@ class SafeAI:
         except Exception as e:
             logger.warning(f"Action execution failed: {e}")
             return False
+            
+    def _is_free_action(self, action_type):
+        """Check if an action is 'free' (doesn't consume from action limit)"""
+        return action_type in ['lay_card', 'charge_card']
     
     def _calculate_affordability(self, card):
         """Calculate how affordable a card is (0-1 scale)"""
@@ -367,9 +402,13 @@ class SafeAI:
         # Bonus if this completes the card
         progress_before = card.get_charging_progress()
         temp_crystals = self.wizard.crystals.copy()
+        temp_crystals_used = card.crystals_used.copy()
+        
         if card.add_crystals(crystal_color, 1, self.wizard):
             progress_after = card.get_charging_progress()
-            self.wizard.crystals = temp_crystals  # Restore
+            # Restore both wizard crystals AND card crystals_used state
+            self.wizard.crystals = temp_crystals
+            card.crystals_used = temp_crystals_used
             
             progress_gain = progress_after - progress_before
             base_value += progress_gain * 30
@@ -467,6 +506,11 @@ class SafeAI:
                     if self.wizard.crystals[color] > 0:
                         card.add_crystals(color, 1, self.wizard)
                         return
+        
+        # BUGFIX: Ultimate fallback - force end turn by setting action count to max
+        # This ensures the AI never gets completely stuck with no valid actions
+        logger.debug(f"AI {self.wizard.color} using ultimate fallback - ending turn")
+        game.current_actions = game.max_actions_per_turn
 
 
 class AIManager:

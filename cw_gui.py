@@ -353,6 +353,11 @@ class GameGUI:
         self.sound_manager.load_sounds()
 
         self.current_action_mode = None
+        
+        # AI turn timing variables for non-blocking behavior
+        self.ai_turn_start_time = 0
+        self.ai_thinking_delay = 1000  # 1000ms delay before AI acts
+        self.ai_turn_executed = False
 
         self.position_coords = {}
         self.calculate_position_coordinates()
@@ -437,13 +442,49 @@ class GameGUI:
 
                     # Pass all events to action panel
                     self.handle_action_panel_event(event)
+                
+                # Handle AI failsafe events during AI turns
+                current_player = self.game.get_current_player()
+                if isinstance(current_player, AIWizard):
+                    ai_action = self.action_panel.handle_ai_event(event)
+                    if ai_action == 'ai_failsafe':
+                        # Reset AI state to clear any frozen/stuck conditions
+                        if hasattr(current_player, 'ai_controller') and current_player.ai_controller:
+                            current_player.ai_controller.reset_state()
+                        # Force end the AI turn
+                        self.game.end_turn()
+                        # Update button visibility for the new current player
+                        new_current_player = self.game.get_current_player()
+                        self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
+                        self.sound_manager.play_sound('click', 0.8)
 
             current_player = self.game.get_current_player()
             if isinstance(current_player, AIWizard) and not self.game.game_over and not self.is_dice_rolling:
-                pygame.time.wait(1000)
-                self.game.execute_ai_turn(current_player)
-                if self.game.current_actions >= self.game.max_actions_per_turn:
-                    self.game.end_turn()
+                current_time = pygame.time.get_ticks()
+                
+                # Check if this is a new AI turn
+                if self.ai_turn_start_time == 0:
+                    self.ai_turn_start_time = current_time
+                    self.ai_turn_executed = False
+                
+                # Check if enough time has passed and we haven't executed yet
+ 
+                if not self.ai_turn_executed and (current_time - self.ai_turn_start_time) >= self.ai_thinking_delay:
+                    self.game.execute_ai_turn(current_player)
+                    self.ai_turn_executed = True
+                    
+                    if self.game.current_actions >= self.game.max_actions_per_turn:
+                        self.game.end_turn()
+                        # Update button visibility for the new current player
+                        new_current_player = self.game.get_current_player()
+                        self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
+                        # Reset for next turn
+                        self.ai_turn_start_time = 0
+                        self.ai_turn_executed = False
+            else:
+                # Reset AI turn timer if not an AI turn
+                self.ai_turn_start_time = 0
+                self.ai_turn_executed = False
 
             self.draw()
 
@@ -511,9 +552,21 @@ class GameGUI:
 
         elif action == 'end_turn':
             self.game.end_turn()
+            # Update button visibility for the new current player
+            new_current_player = self.game.get_current_player()
+            self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
             self.current_action_mode = None
             self.highlight_manager.clear_highlights()
             self.sound_manager.play_sound('click', 0.8)
+
+        elif action == 'ai_failsafe':
+            # Force end the AI turn
+            self.game.end_turn()
+            # Update button visibility for the new current player
+            new_current_player = self.game.get_current_player()
+            self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
+            self.sound_manager.play_sound('click', 0.8)
+            
 
     def get_position_at_coordinates(self, screen_pos):
         """Find which board position was clicked"""
@@ -677,6 +730,9 @@ class GameGUI:
             return
         if key == pygame.K_SPACE:
             self.game.end_turn()
+            # Update button visibility for the new current player
+            new_current_player = self.game.get_current_player()
+            self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
         # Esc is handled by quit dialog in the event loop
 
     # ---- Drawing ----
@@ -687,6 +743,11 @@ class GameGUI:
         self.update_blocking_highlights()
         self.draw_board()
         self.draw_ui()
+        
+        # Draw AI failsafe button during AI turns
+        current_player = self.game.get_current_player()
+        if isinstance(current_player, AIWizard) and not self.game.game_over:
+            self.action_panel.draw_ai_buttons(self.screen)
 
         if self.game.game_over:
             self.draw_game_over()
