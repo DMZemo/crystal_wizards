@@ -64,7 +64,7 @@ class Wizard:
         """Check if wizard has any crystals available for blocking"""
         return self.get_total_crystals_for_blocking() > 0
 
-    def spend_crystals_for_blocking(self, amount):
+    def spend_crystals_for_blocking(self, amount, game=None):
         """
         Spend crystals for blocking damage. Returns actual amount spent.
         Spends crystals in priority order: colored crystals first, then white crystals.
@@ -96,9 +96,16 @@ class Wizard:
                 crystals_spent['white'] = to_spend
                 remaining_to_spend -= to_spend
         
+        # Return spent crystals to the board if game reference is available
+        if game and crystals_spent:
+            # Only return crystals that were actually spent (non-zero amounts)
+            crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
+            if crystals_to_return:
+                game.return_crystals_to_board(crystals_to_return)
+        
         return crystals_to_spend, crystals_spent
     
-    def take_damage(self, damage, gui=None, caster=None):
+    def take_damage(self, damage, gui=None, caster=None, game=None):
         """Take damage and reduce health, with optional crystal blocking"""
         if damage <= 0:
             return
@@ -111,10 +118,10 @@ class Wizard:
             from sound_manager import sound_manager
             
             if isinstance(self, AIWizard):
-                # AI automatically uses maximum crystals available
-                crystals_to_use = min(damage, self.get_total_crystals_for_blocking())
+                # AI blocking strategy based on difficulty
+                crystals_to_use = self._calculate_ai_blocking_amount(damage, game)
                 if crystals_to_use > 0:
-                    blocked_amount, crystals_spent = self.spend_crystals_for_blocking(crystals_to_use)
+                    blocked_amount, crystals_spent = self.spend_crystals_for_blocking(crystals_to_use, game)
                     actual_damage = max(0, damage - blocked_amount)
                     
                     # Play blocking sound and trigger highlight
@@ -124,7 +131,7 @@ class Wizard:
             else:
                 # Human player - trigger blocking dialog if GUI is available
                 if gui is not None:
-                    blocked_amount = gui.show_blocking_dialog(self, damage, caster)
+                    blocked_amount = gui.show_blocking_dialog(self, damage, caster, game)
                     actual_damage = max(0, damage - blocked_amount)
                     
                     if blocked_amount > 0:
@@ -133,6 +140,45 @@ class Wizard:
         
         # Apply the final damage
         self.health = max(0, self.health - actual_damage)
+
+    def _calculate_ai_blocking_amount(self, damage, game):
+        """Calculate how many crystals AI should use for blocking based on difficulty"""
+        if not hasattr(self, 'difficulty'):
+            # Default to maximum blocking if no difficulty set
+            return min(damage, self.get_total_crystals_for_blocking())
+        
+        available_crystals = self.get_total_crystals_for_blocking()
+        max_blockable = min(damage, available_crystals)
+        
+        if self.difficulty == 'easy':
+            # Easy AI: Random blocking amount (0 to max)
+            import random
+            return random.randint(0, max_blockable)
+        
+        elif self.difficulty in ['medium', 'hard']:
+            # Medium/Hard AI: Strategic blocking
+            # Prioritize keeping crystals needed for spells and white crystals
+            
+            # Calculate crystals needed for spells in hand and laid down
+            crystals_needed_for_spells = 0
+            for card in self.hand + self.cards_laid_down:
+                if not card.is_fully_charged():
+                    # Calculate remaining cost: total cost minus crystals already used
+                    remaining_cost = sum(card.cost.values()) - sum(card.crystals_used.values())
+                    crystals_needed_for_spells += remaining_cost
+            
+            # Keep some white crystals as they're versatile
+            white_crystals_to_keep = min(2, self.crystals.get('white', 0))
+            
+            # Calculate how many crystals we can afford to spend
+            crystals_to_reserve = crystals_needed_for_spells + white_crystals_to_keep
+            crystals_available_for_blocking = max(0, available_crystals - crystals_to_reserve)
+            
+            # Block as much as possible without compromising spell casting
+            return min(damage, crystals_available_for_blocking, max_blockable)
+        
+        # Fallback to maximum blocking
+        return max_blockable
 
     def _start_blocking_highlight(self):
         """Start visual highlight effect for blocking (brief animation)"""
@@ -199,7 +245,7 @@ class AIWizard(Wizard):
                     if spell_card.is_fully_charged():
                         adjacent_enemies = game.get_adjacent_enemies(self)
                         if adjacent_enemies:
-                            game.cast_spell(self, spell_card)
+                            game.cast_spell(self, spell_card, gui=game.gui if hasattr(game, 'gui') else None)
                             action_taken = True
                             break
                 if action_taken: 
@@ -265,6 +311,8 @@ class SpellCard:
     def __init__(self, cost_dict):
         self.cost = cost_dict.copy()
         self.crystals_used = {color: 0 for color in cost_dict}
+        # Track original crystal types used (for proper return to board)
+        self.original_crystals_used = {'white': 0, 'red': 0, 'blue': 0, 'green': 0, 'yellow': 0}
         self.damage = sum(cost_dict.values())
 
     def get_total_cost(self):
@@ -287,6 +335,8 @@ class SpellCard:
                 if wizard.crystals[color] >= to_use:
                     wizard.remove_crystals(color, to_use)
                     self.crystals_used['wild'] += to_use
+                    # Track original crystal type used
+                    self.original_crystals_used[color] += to_use
                     return True
 
         # --- Handle standard color requirements ---
@@ -303,12 +353,16 @@ class SpellCard:
             if color == target_color and wizard.crystals[color] >= to_use:
                 wizard.remove_crystals(color, to_use)
                 self.crystals_used[target_color] += to_use
+                # Track original crystal type used
+                self.original_crystals_used[color] += to_use
                 return True
 
             # Use white crystal as substitute for target color
             if color == 'white' and wizard.crystals['white'] >= to_use:
                 wizard.remove_crystals('white', to_use)
                 self.crystals_used[target_color] += to_use
+                # Track that white crystals were used (this is the key fix!)
+                self.original_crystals_used['white'] += to_use
                 return True
 
         return False

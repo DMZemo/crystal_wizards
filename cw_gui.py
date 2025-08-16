@@ -118,18 +118,20 @@ class QuitConfirmDialog:
         self.screen.blit(no_text, no_text.get_rect(center=self._btn_no.center))
 
 class BlockingDialog:
-    def __init__(self, screen, font, wizard, damage, caster):
+    def __init__(self, screen, font, wizard, damage, caster, game=None):
         self.screen = screen
         self.font = font
         self.wizard = wizard
         self.damage = damage
         self.caster = caster
+        self.game = game
         self.visible = False
         self.result = 0  # Amount of damage blocked
         
         # UI state
-        self.crystals_to_spend = 0
+        self.crystals_to_spend = {'red': 0, 'blue': 0, 'green': 0, 'yellow': 0, 'white': 0}
         self.max_crystals = min(damage, wizard.get_total_crystals_for_blocking())
+        self.total_selected = 0
         
     def show(self):
         self.visible = True
@@ -151,60 +153,32 @@ class BlockingDialog:
                         self.visible = False
                     elif event.key == pygame.K_RETURN:
                         # Confirm current selection
-                        if self.crystals_to_spend > 0:
-                            blocked_amount, crystals_spent = self.wizard.spend_crystals_for_blocking(self.crystals_to_spend)
-                            self.result = blocked_amount
+                        if self.total_selected > 0:
+                            # Manually spend the selected crystals
+                            crystals_spent = {}
+                            total_blocked = 0
+                            for color, amount in self.crystals_to_spend.items():
+                                if amount > 0:
+                                    available = self.wizard.crystals.get(color, 0)
+                                    actual_spent = min(amount, available)
+                                    if actual_spent > 0:
+                                        self.wizard.crystals[color] -= actual_spent
+                                        crystals_spent[color] = actual_spent
+                                        total_blocked += actual_spent
+                            
+                            # Return crystals to board if game reference available
+                            if self.game and crystals_spent:
+                                crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
+                                if crystals_to_return:
+                                    self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
+                            
+                            self.result = total_blocked
                         else:
                             self.result = 0
                         self.visible = False
-                    elif event.key == pygame.K_UP and self.crystals_to_spend < self.max_crystals:
-                        self.crystals_to_spend += 1
-                    elif event.key == pygame.K_DOWN and self.crystals_to_spend > 0:
-                        self.crystals_to_spend -= 1
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = event.pos
-                    
-                    # Check button clicks
-                    sw, sh = self.screen.get_size()
-                    dialog_w, dialog_h = int(sw * 0.5), int(sh * 0.4)
-                    dialog_x, dialog_y = (sw - dialog_w) // 2, (sh - dialog_h) // 2
-                    
-                    # Plus button (increase crystals)
-                    plus_x = dialog_x + dialog_w - 120
-                    plus_y = dialog_y + 120
-                    plus_rect = pygame.Rect(plus_x, plus_y, 40, 30)
-                    
-                    # Minus button (decrease crystals) 
-                    minus_x = dialog_x + 80
-                    minus_y = dialog_y + 120
-                    minus_rect = pygame.Rect(minus_x, minus_y, 40, 30)
-                    
-                    # Block button
-                    block_x = dialog_x + dialog_w // 2 - 80
-                    block_y = dialog_y + dialog_h - 80
-                    block_rect = pygame.Rect(block_x, block_y, 70, 35)
-                    
-                    # Skip button
-                    skip_x = dialog_x + dialog_w // 2 + 10
-                    skip_y = dialog_y + dialog_h - 80
-                    skip_rect = pygame.Rect(skip_x, skip_y, 70, 35)
-                    
-                    if plus_rect.collidepoint(mx, my) and self.crystals_to_spend < self.max_crystals:
-                        self.crystals_to_spend += 1
-                    elif minus_rect.collidepoint(mx, my) and self.crystals_to_spend > 0:
-                        self.crystals_to_spend -= 1
-                    elif block_rect.collidepoint(mx, my):
-                        # Confirm blocking
-                        if self.crystals_to_spend > 0:
-                            blocked_amount, crystals_spent = self.wizard.spend_crystals_for_blocking(self.crystals_to_spend)
-                            self.result = blocked_amount
-                        else:
-                            self.result = 0
-                        self.visible = False
-                    elif skip_rect.collidepoint(mx, my):
-                        # Skip blocking
-                        self.result = 0
-                        self.visible = False
+                    self._handle_mouse_click(mx, my)
                         
             # Render the dialog
             self.render()
@@ -212,6 +186,77 @@ class BlockingDialog:
             clock.tick(60)
             
         return self.result
+    
+    def _handle_mouse_click(self, mx, my):
+        """Handle mouse clicks in the blocking dialog"""
+        sw, sh = self.screen.get_size()
+        dialog_w, dialog_h = int(sw * 0.6), int(sh * 0.5)
+        dialog_x, dialog_y = (sw - dialog_w) // 2, (sh - dialog_h) // 2
+        
+        # Crystal selection buttons (+ and - for each color)
+        colors = ['red', 'blue', 'green', 'yellow', 'white']
+        button_y = dialog_y + 120
+        
+        for i, color in enumerate(colors):
+            if self.wizard.crystals.get(color, 0) == 0:
+                continue  # Skip colors the wizard doesn't have
+                
+            button_x = dialog_x + 50 + i * 90
+            plus_rect = pygame.Rect(button_x + 50, button_y, 25, 25)
+            minus_rect = pygame.Rect(button_x + 15, button_y, 25, 25)
+            
+            if plus_rect.collidepoint(mx, my):
+                # Increase this color if possible
+                available = self.wizard.crystals.get(color, 0)
+                current = self.crystals_to_spend[color]
+                if current < available and self.total_selected < self.max_crystals:
+                    self.crystals_to_spend[color] += 1
+                    self.total_selected += 1
+            elif minus_rect.collidepoint(mx, my):
+                # Decrease this color
+                if self.crystals_to_spend[color] > 0:
+                    self.crystals_to_spend[color] -= 1
+                    self.total_selected -= 1
+        
+        # Block button
+        block_x = dialog_x + dialog_w // 2 - 80
+        block_y = dialog_y + dialog_h - 80
+        block_rect = pygame.Rect(block_x, block_y, 70, 35)
+        
+        # Skip button
+        skip_x = dialog_x + dialog_w // 2 + 10
+        skip_y = dialog_y + dialog_h - 80
+        skip_rect = pygame.Rect(skip_x, skip_y, 70, 35)
+        
+        if block_rect.collidepoint(mx, my):
+            # Confirm blocking
+            if self.total_selected > 0:
+                # Manually spend the selected crystals
+                crystals_spent = {}
+                total_blocked = 0
+                for color, amount in self.crystals_to_spend.items():
+                    if amount > 0:
+                        available = self.wizard.crystals.get(color, 0)
+                        actual_spent = min(amount, available)
+                        if actual_spent > 0:
+                            self.wizard.crystals[color] -= actual_spent
+                            crystals_spent[color] = actual_spent
+                            total_blocked += actual_spent
+                
+                # Return crystals to board if game reference available
+                if self.game and crystals_spent:
+                    crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
+                    if crystals_to_return:
+                        self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
+                
+                self.result = total_blocked
+            else:
+                self.result = 0
+            self.visible = False
+        elif skip_rect.collidepoint(mx, my):
+            # Skip blocking
+            self.result = 0
+            self.visible = False
         
     def render(self):
         """Render the blocking dialog"""
@@ -276,8 +321,8 @@ class BlockingDialog:
         self.screen.blit(minus_text, (minus_x + 17, minus_y + 5))
         
         # Result preview
-        final_damage = max(0, self.damage - self.crystals_to_spend)
-        result_text = f"Final damage: {final_damage} (blocked: {min(self.crystals_to_spend, self.damage)})"
+        final_damage = max(0, self.damage - self.total_selected)
+        result_text = f"Final damage: {final_damage} (blocked: {self.total_selected})"
         result_surface = self.font.render(result_text, True, (255, 255, 100))
         result_x = dialog_x + (dialog_w - result_surface.get_width()) // 2
         self.screen.blit(result_surface, (result_x, dialog_y + 160))
@@ -289,7 +334,7 @@ class BlockingDialog:
         skip_y = dialog_y + dialog_h - 80
         
         # Block button
-        block_color = (0, 100, 200) if self.crystals_to_spend > 0 else (100, 100, 100)
+        block_color = (0, 100, 200) if self.total_selected > 0 else (100, 100, 100)
         pygame.draw.rect(self.screen, block_color, (block_x, block_y, 70, 35))
         pygame.draw.rect(self.screen, (255, 255, 255), (block_x, block_y, 70, 35), 2)
         block_text = self.font.render("Block", True, (255, 255, 255))
@@ -313,6 +358,8 @@ class GameGUI:
     def __init__(self, game):
         """Initialize the game GUI to fill the entire screen in a closable window."""
         self.game = game
+        # Set GUI reference in game for blocking dialogs
+        game.gui = self
 
         if not pygame.get_init():
             pygame.init()
@@ -365,6 +412,12 @@ class GameGUI:
         # Spell card horizontal row layout state
         self.spell_card_rects = []
         self.visible_hand = []
+        
+        # Attack animation system
+        self.attack_animations = []
+        
+        # Crystal return animation system
+        self.crystal_return_animations = []
         self.hovered_card_index = None
         self.selected_card_index = None
         self.mouse_pos = (0, 0)
@@ -384,10 +437,142 @@ class GameGUI:
         return base
 
     # ---- Basic helpers ----
-    def show_blocking_dialog(self, wizard, damage, caster):
+    def show_blocking_dialog(self, wizard, damage, caster, game=None):
         """Show the dialog for blocking damage with crystals."""
-        dialog = BlockingDialog(self.screen, self.font_medium, wizard, damage, caster)
+        # Add attack animation before showing blocking dialog
+        if wizard.location in self.position_coords:
+            self.add_attack_animation(wizard.location)
+        
+        dialog = BlockingDialog(self.screen, self.font_medium, wizard, damage, caster, game)
         return dialog.run_modal()
+    
+    def add_attack_animation(self, position):
+        """Add a sparkle attack animation at the given position"""
+        if position in self.position_coords:
+            x, y = self.position_coords[position]
+            animation = {
+                'x': x,
+                'y': y,
+                'start_time': pygame.time.get_ticks(),
+                'duration': 1000,  # 1 second
+                'particles': []
+            }
+            
+            # Create sparkle particles
+            import random
+            for _ in range(15):
+                particle = {
+                    'x': x + random.randint(-30, 30),
+                    'y': y + random.randint(-30, 30),
+                    'vx': random.uniform(-2, 2),
+                    'vy': random.uniform(-2, 2),
+                    'life': 1.0,
+                    'size': random.randint(2, 6),
+                    'color': random.choice([(255, 255, 0), (255, 200, 0), (255, 255, 255), (255, 100, 100)])
+                }
+                animation['particles'].append(particle)
+            
+            self.attack_animations.append(animation)
+    
+    def update_attack_animations(self):
+        """Update and remove expired attack animations"""
+        current_time = pygame.time.get_ticks()
+        
+        for animation in self.attack_animations[:]:
+            elapsed = current_time - animation['start_time']
+            if elapsed >= animation['duration']:
+                self.attack_animations.remove(animation)
+                continue
+            
+            # Update particles
+            progress = elapsed / animation['duration']
+            for particle in animation['particles']:
+                particle['x'] += particle['vx']
+                particle['y'] += particle['vy']
+                particle['life'] = 1.0 - progress
+                particle['vy'] += 0.1  # Gravity effect
+    
+    def draw_attack_animations(self):
+        """Draw all active attack animations"""
+        for animation in self.attack_animations:
+            for particle in animation['particles']:
+                if particle['life'] > 0:
+                    alpha = int(255 * particle['life'])
+                    size = int(particle['size'] * particle['life'])
+                    if size > 0:
+                        # Create a surface with per-pixel alpha
+                        particle_surface = pygame.Surface((size * 2, size * 2), pygame.SRCALPHA)
+                        color_with_alpha = (*particle['color'][:3], alpha)
+                        pygame.draw.circle(particle_surface, color_with_alpha, (size, size), size)
+                        self.screen.blit(particle_surface, (int(particle['x'] - size), int(particle['y'] - size)))
+    
+    def add_crystal_return_animation(self, from_pos, to_pos, color, count=1):
+        """Add animation for crystals returning to the board"""
+        if from_pos in self.position_coords and to_pos in self.position_coords:
+            start_x, start_y = self.position_coords[from_pos]
+            end_x, end_y = self.position_coords[to_pos]
+            
+            for i in range(count):
+                animation = {
+                    'start_x': start_x,
+                    'start_y': start_y,
+                    'end_x': end_x,
+                    'end_y': end_y,
+                    'current_x': start_x,
+                    'current_y': start_y,
+                    'color': color,
+                    'start_time': pygame.time.get_ticks() + (i * 100),  # Stagger animations
+                    'duration': 1500,  # 1.5 seconds
+                    'started': False
+                }
+                self.crystal_return_animations.append(animation)
+    
+    def update_crystal_return_animations(self):
+        """Update crystal return animations"""
+        current_time = pygame.time.get_ticks()
+        
+        for animation in self.crystal_return_animations[:]:
+            if not animation['started'] and current_time >= animation['start_time']:
+                animation['started'] = True
+            
+            if not animation['started']:
+                continue
+                
+            elapsed = current_time - animation['start_time']
+            if elapsed >= animation['duration']:
+                self.crystal_return_animations.remove(animation)
+                continue
+            
+            # Smooth easing animation
+            progress = elapsed / animation['duration']
+            # Use easeInOutQuad for smooth motion
+            if progress < 0.5:
+                progress = 2 * progress * progress
+            else:
+                progress = 1 - 2 * (1 - progress) * (1 - progress)
+            
+            animation['current_x'] = animation['start_x'] + (animation['end_x'] - animation['start_x']) * progress
+            animation['current_y'] = animation['start_y'] + (animation['end_y'] - animation['start_y']) * progress
+    
+    def draw_crystal_return_animations(self):
+        """Draw crystal return animations"""
+        for animation in self.crystal_return_animations:
+            if animation['started']:
+                # Draw crystal as a small colored circle
+                color_map = {
+                    'red': (255, 100, 100),
+                    'blue': (100, 100, 255),
+                    'green': (100, 255, 100),
+                    'yellow': (255, 255, 100),
+                    'white': (255, 255, 255)
+                }
+                color = color_map.get(animation['color'], (200, 200, 200))
+                
+                # Draw with a slight glow effect
+                pygame.draw.circle(self.screen, color, 
+                                 (int(animation['current_x']), int(animation['current_y'])), 8)
+                pygame.draw.circle(self.screen, (255, 255, 255), 
+                                 (int(animation['current_x']), int(animation['current_y'])), 8, 2)
 
     def calculate_position_coordinates(self):
         """Pre-calculate screen coordinates for all board positions using new layout"""
@@ -609,10 +794,6 @@ class GameGUI:
                 self.initiate_mine_sequence(current_player, position)
                 return
 
-        # Default click: try a move if allowed
-        if self.game.can_move(current_player):
-            if self.game.move_player(current_player, position):
-                self.sound_manager.play_move()
 
     def initiate_mine_sequence(self, player, position):
         """Starts the dice rolling animation for a mining action."""
@@ -741,7 +922,11 @@ class GameGUI:
         self.screen.fill(COLORS['light_grey'])
 
         self.update_blocking_highlights()
+        self.update_attack_animations()
+        self.update_crystal_return_animations()
         self.draw_board()
+        self.draw_attack_animations()
+        self.draw_crystal_return_animations()
         self.draw_ui()
         
         # Draw AI failsafe button during AI turns
@@ -809,10 +994,28 @@ class GameGUI:
 
         elif position.startswith('hex_'):
             self.draw_hexagon(x, y, 20, COLORS['grey'], COLORS['black'])
-            crystal_count = self.game.board.white_crystals.get(position, 0)
+            # Determine crystal count from canonical storage
+            crystal_count = 0
+            pos_data = self.game.board.positions.get(position)
+            if pos_data:
+                # for mines, show count from board.mines; for hexes/center use positions[...] crystals
+                if pos_data.get('type') == 'mine':
+                    mine_color = self.game.board.get_mine_color_from_position(position)
+                    if mine_color:
+                        crystal_count = self.game.board.mines.get(mine_color, {}).get('crystals', 0)
+                else:
+                    crystal_count = pos_data.get('crystals', 0)
+
+            # Draw crystal indicator if crystals exist
             if crystal_count > 0:
-                pygame.draw.circle(self.screen, COLORS['white'], (x, y), 8)
-                pygame.draw.circle(self.screen, COLORS['black'], (x, y), 8, 1)
+                # Example: draw a small circle or stack to indicate crystals
+                pygame.draw.circle(self.screen, (255, 255, 255), coords, 10)  # white crystal indicator
+                # optionally draw count text
+                if crystal_count > 1:
+                    font = self.font_small
+                    text = font.render(str(crystal_count), True, (0, 0, 0))
+                    text_rect = text.get_rect(center=(coords[0], coords[1]))
+                    self.screen.blit(text, text_rect)
 
         elif position.startswith('mine_'):
             color_map = {

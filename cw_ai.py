@@ -171,10 +171,11 @@ class StrategicAI:
         # Get all possible actions
         possible_actions = self._get_possible_actions(game)
         if not possible_actions:
-            # FIX: Emergency fallback - ensure AI can always do something
+            # FIXED: When no actions available, try emergency fallback but don't loop
             logger.warning(f"AI {self.wizard.color} has no actions available, using emergency fallback")
-            self._emergency_fallback(game)
-            return True, 'emergency_fallback'
+            fallback_success = self._emergency_fallback(game)
+            # Return False to break the action loop and end turn
+            return False, 'emergency_fallback' if fallback_success else None
         
         # Score and choose best action
         best_action = self._select_best_action(possible_actions, game)
@@ -447,7 +448,7 @@ class StrategicAI:
         
         try:
             if action_type == 'cast_spell':
-                success = game.cast_spell(self.wizard, action['spell_card'])
+                success = game.cast_spell(self.wizard, action['spell_card'], gui=game.gui if hasattr(game, 'gui') else None)
             
             elif action_type == 'mine_white':
                 success = game.mine_white_crystal(self.wizard, action['position'])
@@ -571,7 +572,7 @@ class StrategicAI:
         logger.warning(f"AI {self.wizard.color} using emergency fallback")
         
         # Try one simple random action
-        self._quick_fallback_action(game)
+        return self._quick_fallback_action(game)
     
     def _quick_fallback_action(self, game):
         """Perform one quick random valid action"""
@@ -583,8 +584,8 @@ class StrategicAI:
                 if spell_card.is_fully_charged():
                     enemies = game.get_adjacent_enemies(self.wizard)
                     if enemies:
-                        game.cast_spell(self.wizard, spell_card)
-                        return
+                        success = game.cast_spell(self.wizard, spell_card, gui=game.gui if hasattr(game, 'gui') else None)
+                        return success
         
         # Try to mine
         if game.can_mine(self.wizard):
@@ -592,41 +593,43 @@ class StrategicAI:
             if (game.board.has_crystals_at_position(pos) and 
                 not game.board.is_mine(pos) and 
                 self.wizard.can_hold_more_crystals()):
-                game.mine_white_crystal(self.wizard, pos)
-                return
+                success = game.mine_white_crystal(self.wizard, pos)
+                return success
             elif game.board.is_healing_springs(pos) and self.wizard.health < 6:
                 roll = random.randint(1, 3)
-                game.resolve_mine_with_roll(self.wizard, pos, roll)
-                return
+                success = game.resolve_mine_with_roll(self.wizard, pos, roll)
+                return success
             elif game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():
                 roll = random.randint(1, 6)
-                game.resolve_mine_with_roll(self.wizard, pos, roll)
-                return
+                success = game.resolve_mine_with_roll(self.wizard, pos, roll)
+                return success
         
         # Try to move randomly
         if game.can_move(self.wizard):
             adjacent = game.board.get_adjacent_positions(self.wizard.location)
             if adjacent:
                 target = random.choice(adjacent)
-                game.move_player(self.wizard, target)
-                return
+                success = game.move_player(self.wizard, target)
+                return success
         
         # If all else fails, try to lay down a card or charge something
         if len(self.wizard.cards_laid_down) < 2 and self.wizard.hand:
-            self.wizard.lay_down_spell_card(0)
-            return
+            success = self.wizard.lay_down_spell_card(0)
+            return success
         
         # Try to charge a card
         for card in self.wizard.cards_laid_down:
             if not card.is_fully_charged():
                 for color in ['white', 'red', 'blue', 'green', 'yellow']:
                     if self.wizard.crystals[color] > 0:
-                        card.add_crystals(color, 1, self.wizard)
-                        return
+                        success = card.add_crystals(color, 1, self.wizard)
+                        if success:
+                            return True
         
-        # Ultimate fallback - force end turn
+        # Ultimate fallback - force end turn (no action taken)
         logger.debug(f"AI {self.wizard.color} using ultimate fallback - ending turn")
         game.current_actions = game.max_actions_per_turn
+        return False  # No action was actually taken
 
 
 class AIManager:

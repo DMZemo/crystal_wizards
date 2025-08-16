@@ -21,28 +21,31 @@ class CrystalWizardsGame:
             self.num_players = num_players
             self.num_ai = num_ai
         self.total_players = self.num_players + self.num_ai
-        
+
         self.board = GameBoard()
         self.players = []
-        
+
         self.current_player_index = 0
         self.current_actions = 0
         self.max_actions_per_turn = 3
         self.spell_deck = SpellCardDeck()
         self.game_over = False
         self.winner = None
-        
+
         # Action counters for current turn
         self.moves_used = 0
         self.mines_used = 0
         self.spells_cast = 0
-        
+
         # Action log for the ticker tape
         self.action_log = collections.deque(maxlen=20)
-        
+
+        # GUI reference for blocking dialogs
+        self.gui = None
+
     def initialize_game(self):
         """Initialize the game with players and board setup"""
-        
+
         # If we have a players_config from the start screen, use that to construct players in order
         if self.players_config:
             for p in self.players_config:
@@ -76,31 +79,39 @@ class CrystalWizardsGame:
                 ai_controller = AIManager.create_ai(ai_wizard, 'medium')
                 ai_wizard.set_ai_controller(ai_controller)
                 self.players.append(ai_wizard)
-        
+
         # Initialize board and place wizards
         self.board.initialize_board()
         self.place_wizards_on_board()
-        
+
         # Initialize spell deck
         self.spell_deck.initialize_deck()
         self.spell_deck.shuffle()
-        
+
         # Deal initial spell cards to each player
         for player in self.players:
             for _ in range(3):  # Each player starts with 3 spell cards
                 card = self.spell_deck.draw_card()
                 if card:
                     player.hand.append(card)
-        
+
         self.action_log.append("The battle for the crystals begins!")
-        
+
     def place_wizards_on_board(self):
-        """Place wizards on starting positions on the outer ring"""
+        """Place wizards on starting positions on the board"""
+        colors = ['red', 'blue', 'green', 'yellow']
         for i, player in enumerate(self.players):
-            # Place players on their matching colored rectangle positions
-            start_pos = self.board.get_colored_rectangle_position(player.color)
+            start_pos = None
+            # try players_config or default mapping
+            if getattr(player, 'starting_location', None):
+                start_pos = player.starting_location
+            # fallback: pick colored rectangle if available
+            rect_pos = self.board.colored_rectangles.get(player.color)
+            if rect_pos:
+                start_pos = rect_pos
+            if start_pos is None:
+                start_pos = random.choice(self.board.get_all_positions())
             player.location = start_pos
-            # Use add_wizard_to_position to ensure it's always a list
             self.board.add_wizard_to_position(start_pos, player)
         
     def get_current_player(self):
@@ -144,18 +155,20 @@ class CrystalWizardsGame:
         """Perform a mining action on a tile with a white crystal (no dice roll)."""
         if not self.can_mine(player):
             return False
-        
-        if position in self.board.white_crystals and self.board.white_crystals[position] > 0:
+
+        pos_data = self.board.positions.get(position)
+        if pos_data and pos_data.get('type') == 'outer_hexagon' and pos_data.get('crystals', 0) > 0:
             # Check if player can hold more crystals before removing from board
             if not player.can_hold_more_crystals():
                 return "reserve_full"  # Return special value to indicate capacity issue
-            
-            self.board.white_crystals[position] -= 1
+
+            # remove crystal from canonical storage
+            self.board.positions[position]['crystals'] = max(0, self.board.positions[position].get('crystals', 0) - 1)
             player.add_crystals('white', 1)
-            
+
             self.mines_used += 1
             self.current_actions += 1
-            
+
             # Log the mining action
             self.action_log.append(f"{player.color.title()} Wizard mined 1 white crystal.")
             return True
@@ -165,23 +178,23 @@ class CrystalWizardsGame:
         """Resolve a mining action using a pre-determined dice roll from the GUI."""
         if not self.can_mine(player):
             return False
-        
+
         mine_result = self.board.resolve_mine_with_roll(position, player, roll_result)
-        
+
         if mine_result:
             crystals_gained, teleport_position = mine_result
-            
+
             # Log healing and crystal gains
             if position == 'center':
                 self.action_log.append(f"{player.color.title()} healed for {roll_result} HP at the Springs.")
             if crystals_gained:
                 for color, amount in crystals_gained.items():
                     self.action_log.append(f"{player.color.title()} mined {amount} {color} crystal(s).")
-            
+
             # Add crystals to player's reserve
             for color, amount in crystals_gained.items():
                 player.add_crystals(color, amount)
-            
+
             # Handle teleportation if applicable
             if teleport_position:
                 self.action_log.append(f"{player.color.title()} was teleported to {teleport_position}.")
@@ -189,7 +202,7 @@ class CrystalWizardsGame:
                 self.board.remove_wizard_from_position(old_location, player)
                 player.location = teleport_position
                 self.board.add_wizard_to_position(teleport_position, player)
-            
+
             self.mines_used += 1
             self.current_actions += 1
             return True
@@ -226,13 +239,13 @@ class CrystalWizardsGame:
             self.action_log.append("...but no one was in range!")
 
         for target in targets:
-            target.take_damage(damage, gui=gui, caster=player)
+            target.take_damage(damage, gui=gui, caster=player, game=self)
             self.action_log.append(f"{target.color.title()} Wizard took {damage} damage.")
             if target.health <= 0:
                 self.eliminate_player(target)
         
-        # FIXED: Proper crystal return logic
-        self.return_crystals_to_board(spell_card.crystals_used)
+        # FIXED: Proper crystal return logic using original crystal types
+        self.return_crystals_to_board(spell_card.original_crystals_used, player.location)
         player.cards_laid_down.remove(spell_card)
         
         new_card = self.spell_deck.draw_card()
@@ -251,7 +264,7 @@ class CrystalWizardsGame:
         self.action_log.append(f"{player.color.title()} Wizard has been eliminated!")
         
         # FIXED: Return player's crystals to the board when they die
-        self.return_crystals_to_board(player.crystals)
+        self.return_crystals_to_board(player.crystals, player.location)
         
         self.board.remove_wizard_from_position(player.location, player)
         
@@ -264,46 +277,72 @@ class CrystalWizardsGame:
             elif self.current_player_index >= len(self.players) and len(self.players) > 0:
                 self.current_player_index = 0
 
-    def return_crystals_to_board(self, crystals_used):
+    def return_crystals_to_board(self, crystals_used, from_position=None):
         """
-        FIXED: Return used crystals back to the board with proper logic.
-        White crystals go to empty white crystal spawn points.
-        Colored crystals return to their respective mines.
+        Return used crystals back to the board with proper logic.
+        White crystals go to outer hex positions (positions[...] with type outer_hexagon).
+        Colored crystals return to their respective mines (max 9 per mine).
         """
         for color, amount in crystals_used.items():
+            if amount <= 0:
+                continue
+
             if color in ['red', 'blue', 'green', 'yellow']:
-                # Return colored crystals to their respective mines
+                # Return colored crystals to their respective mines with 9-crystal cap
                 if color in self.board.mines:
-                    self.board.mines[color]['crystals'] = min(9, self.board.mines[color]['crystals'] + amount)
+                    old_amount = self.board.mines[color]['crystals']
+                    space_available = 9 - old_amount
+                    actual_returned = min(amount, space_available)
+
+                    if actual_returned > 0:
+                        self.board.mines[color]['crystals'] = old_amount + actual_returned
+
+                        # Trigger animation if GUI is available
+                        if hasattr(self, 'gui') and self.gui and from_position:
+                            mine_position = self.board.mines[color]['position']
+                            self.gui.add_crystal_return_animation(from_position, mine_position, color, actual_returned)
+
+                    # Log if we couldn't return all crystals due to capacity
+                    if actual_returned < amount:
+                        lost_crystals = amount - actual_returned
+                        self.action_log.append(f"Warning: {lost_crystals} {color} crystal(s) lost - mine at capacity!")
+
             elif color == 'white':
-                # FIXED: Return white crystals to empty white crystal spawn points
-                self.return_white_crystals_to_spawn_points(amount)
+                # Return white crystals to empty outer hex positions
+                self.return_white_crystals_to_spawn_points(amount, from_position)
     
-    def return_white_crystals_to_spawn_points(self, amount):
+    def return_white_crystals_to_spawn_points(self, amount, from_position=None):
         """
-        Return white crystals to empty white crystal spawn points (hex tiles).
-        This is the correct behavior according to game rules.
+        Return white crystals to empty white crystal spawn points (outer hex tiles).
+        Each hex position can hold maximum 1 white crystal.
         """
-        # Find all hex positions that currently have 0 white crystals
+        # Find all empty outer hex positions (those with 0 crystals)
         empty_spawn_points = []
-        for hex_pos in [f'hex_{i}' for i in range(12)]:
-            if hex_pos in self.board.white_crystals and self.board.white_crystals[hex_pos] == 0:
-                empty_spawn_points.append(hex_pos)
-        
-        # Return crystals to random empty spawn points
+        for pos, data in self.board.positions.items():
+            if data.get('type') == 'outer_hexagon' and data.get('crystals', 0) == 0:
+                empty_spawn_points.append(pos)
+
+        # Return crystals to empty spawn points only
         crystals_returned = 0
+
         while crystals_returned < amount and empty_spawn_points:
             # Choose a random empty spawn point
             spawn_point = random.choice(empty_spawn_points)
-            self.board.white_crystals[spawn_point] = 1
             empty_spawn_points.remove(spawn_point)
+
+            # Place exactly 1 crystal on the empty hex position (update canonical storage)
+            self.board.positions[spawn_point]['crystals'] = 1
             crystals_returned += 1
-        
-        # If we still have crystals to return but no empty spawn points,
-        # we can't return them (this is rare but possible)
+
+            # Trigger animation if GUI is available
+            if hasattr(self, 'gui') and self.gui and from_position:
+                self.gui.add_crystal_return_animation(from_position, spawn_point, 'white', 1)
+
+        # Log if we couldn't return all crystals due to no empty spawn points
         if crystals_returned < amount:
-            self.action_log.append(f"Warning: Could only return {crystals_returned} of {amount} white crystals - no empty spawn points!")
-        
+            lost_crystals = amount - crystals_returned
+            self.action_log.append(f"Warning: {lost_crystals} white crystal(s) lost - no empty hex positions available!")
+
     def end_turn(self):
         """End the current player's turn and move to next player"""
         current_player_name = self.get_current_player().color.title()

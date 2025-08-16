@@ -1,14 +1,13 @@
 """
 Crystal Wizards - Game Board Implementation
-Unified and Cleaned Version
-Includes NewBoardLayout (12 grey outer hexagons) and GameBoard logic.
+Refactored to use positions[<pos>]['crystals'] as single source of truth
+for white crystals (hex tiles), removing duplicate white_crystals usage.
 """
 
 import math
 import random
 import pygame
 from pygame.locals import QUIT, MOUSEBUTTONDOWN, KEYDOWN, K_ESCAPE
-
 
 class NewBoardLayout:
     """New board layout with clean connections and logical positioning"""
@@ -61,6 +60,7 @@ class NewBoardLayout:
                 'type': 'outer_hexagon',
                 'color': 'grey',
                 'shape': 'hexagon',
+                # hex tiles start with 1 white crystal
                 'crystals': 1,
                 'ring_position': i
             }
@@ -77,7 +77,8 @@ class NewBoardLayout:
                 'type': 'mine',
                 'color': config['color'],
                 'shape': 'circle',
-                'crystals': 9,
+                # mines are separately counted (board.mines) but keep field here for completeness
+                'crystals': 0,
                 'direction': config['direction']
             }
 
@@ -141,33 +142,15 @@ class NewBoardLayout:
             'mine_west': (center_x - mine_distance, center_y)
         })
 
-    def get_connections(self, position_id):
-        return self.connections.get(position_id, [])
-
-    def is_adjacent(self, pos1, pos2):
-        return pos2 in self.connections.get(pos1, [])
-
     def get_outer_ring_positions(self):
         return [f'hex_{i}' for i in range(12)]
 
-    def get_mine_positions(self):
-        return ['mine_north', 'mine_south', 'mine_east', 'mine_west']
-
-    def validate_connectivity(self):
-        if not self.positions:
-            return False
-        visited = set()
-        queue = [list(self.positions.keys())[0]]
-        while queue:
-            current = queue.pop(0)
-            if current in visited:
-                continue
-            visited.add(current)
-            for adj in self.get_connections(current):
-                if adj not in visited:
-                    queue.append(adj)
-        return len(visited) == len(self.positions)
-
+    def get_connections(self, position):
+        return self.connections.get(position, [])
+    
+    def is_adjacent(self, pos1, pos2):
+        """Check if two positions are adjacent"""
+        return pos2 in self.connections.get(pos1, [])
 
 class GameBoard:
     def __init__(self):
@@ -185,19 +168,48 @@ class GameBoard:
             'green': 'rect_north',
             'yellow': 'rect_south'
         }
-        self.white_crystals = {}
         self.positions = {}
         self.connections = {}
 
+    @property
+    def white_crystals(self):
+        """
+        Returns a dictionary-like interface for white crystal counts by position.
+        White crystals are stored on outer hexagon tiles in self.positions.
+        """
+        white_crystal_dict = {}
+        for position, data in self.positions.items():
+            if data.get('type') == 'outer_hexagon':
+                white_crystal_dict[position] = data.get('crystals', 0)
+        return white_crystal_dict
+
     def initialize_board(self):
         self.layout.initialize_layout()
-        self.positions = self.layout.positions.copy()
-        self.connections = self.layout.connections.copy()
-        self.place_initial_crystals()
+        # Copy positions and connections from layout (positions include 'crystals')
+        self.positions = {k: v.copy() for k, v in self.layout.positions.items()}
+        self.connections = {k: list(v) for k, v in self.layout.connections.items()}
+        # ensure mines field crystals are reflected in positions where appropriate
+        for color, mine in self.mines.items():
+            pos = mine['position']
+            if pos in self.positions:
+                # store mine crystal count separately; positions[<mine>]['crystals'] can be 0 (we rely on self.mines)
+                self.positions[pos]['crystals'] = self.positions[pos].get('crystals', 0)
 
     def place_initial_crystals(self):
+        # outer hexes start with 1 white crystal (already set in layout), ensure it's present
         for i in range(12):
-            self.white_crystals[f'hex_{i}'] = 1
+            hex_id = f'hex_{i}'
+            if hex_id in self.positions:
+                self.positions[hex_id]['crystals'] = 1
+
+    def add_white_crystals_to_empty_tiles(self, amount):
+        empty_tiles = [pos for pos, data in self.positions.items()
+                       if data.get('type') == 'outer_hexagon' and data.get('crystals', 0) == 0]
+        for _ in range(amount):
+            if empty_tiles:
+                tile = random.choice(empty_tiles)
+                self.positions[tile]['crystals'] = 1
+                empty_tiles.remove(tile)
 
     def get_all_positions(self):
         return list(self.positions.keys())
@@ -206,32 +218,30 @@ class GameBoard:
         return self.layout.get_connections(position)
 
     def get_adjacent_empty_positions(self, position):
-        return [pos for pos in self.get_adjacent_positions(position) if pos not in self.wizards_on_board or len(self.wizards_on_board[pos]) == 0]
+        return [pos for pos in self.get_adjacent_positions(position)
+                if not self.wizards_on_board.get(pos)]
 
     def get_mineable_positions(self, position):
         mineable = []
         if self.has_crystals_at_position(position):
             mineable.append(position)
         return mineable
-    
-    def get_castable_positions(self, position):
-        castable = []
-        for adj in self.get_adjacent_positions(position):
-            if self.has_wizards_at_position(adj):
-                castable.append(adj)
-        return castable
-
-    def has_wizards_at_position(self, position):
-        return position in self.wizards_on_board and len(self.wizards_on_board[position]) > 0
 
     def has_crystals_at_position(self, position):
-        if position in self.white_crystals and self.white_crystals[position] > 0:
-            return True
+        # Check outer hex (white crystal)
+        if position in self.positions:
+            pos_data = self.positions[position]
+            if pos_data.get('type') == 'outer_hexagon' and pos_data.get('crystals', 0) > 0:
+                return True
+            if pos_data.get('type') == 'healing_springs':
+                # center is a special case (treat as having heal crystals)
+                return True
+        # Check mines
         if position.startswith('mine_'):
             mine_color = self.get_mine_color_from_position(position)
             if mine_color and self.mines[mine_color]['crystals'] > 0:
                 return True
-        return position == 'center'
+        return False
 
     def get_mine_color_from_position(self, mine_position):
         return {
@@ -241,21 +251,8 @@ class GameBoard:
             'mine_east': 'blue'
         }.get(mine_position)
 
-    def add_white_crystals_to_empty_tiles(self, amount):
-        empty_tiles = [pos for pos, count in self.white_crystals.items() if count == 0]
-        for _ in range(amount):
-            if empty_tiles:
-                tile = random.choice(empty_tiles)
-                self.white_crystals[tile] = 1
-                empty_tiles.remove(tile)
-
-    def is_healing_springs(self, position):
-        return position == 'center'
-
-    def is_mine(self, position):
-        return position.startswith('mine_')
-
     def resolve_mine_with_roll(self, position, wizard, mine_roll):
+        # position provided may be 'center', 'mine_x' or hex
         if position == 'center':
             wizard.heal(mine_roll)
             return ({}, random.choice(self.layout.get_outer_ring_positions()))
@@ -268,25 +265,21 @@ class GameBoard:
                 current_total = sum(wizard.crystals.values())
                 space_available = wizard.max_crystals - current_total
                 crystals_to_give = min(mine_roll, space_available)
-                
+
                 # Only remove the crystals that will actually be given to the player
                 self.mines[mine_color]['crystals'] -= crystals_to_give
-                return ({mine_color: crystals_to_give}, self.colored_rectangles[mine_color] if crystals_to_give > 0 else None)
-        elif position in self.white_crystals and self.white_crystals[position] > 0:
-            self.white_crystals[position] -= 1
+                return ({mine_color: crystals_to_give},
+                        self.colored_rectangles[mine_color] if crystals_to_give > 0 else None)
+        elif position in self.positions and self.positions[position].get('type') == 'outer_hexagon' and self.positions[position].get('crystals', 0) > 0:
+            # Remove the white crystal from the hex tile and return it
+            self.positions[position]['crystals'] = max(0, self.positions[position].get('crystals', 0) - 1)
             return ({'white': 1}, None)
         return None
-    
-    def get_colored_rectangle_position(self, color):
-        return self.colored_rectangles.get(color)
-    
+
     def add_wizard_to_position(self, position, wizard):
-        """Add a wizard to a position, handling multiple wizards per tile"""
         if position not in self.wizards_on_board:
             self.wizards_on_board[position] = []
-        if wizard not in self.wizards_on_board[position]:
-            self.wizards_on_board[position].append(wizard)
-        wizard.location = position
+        self.wizards_on_board[position].append(wizard)
 
     def remove_wizard_from_position(self, position, wizard):
         """Remove a wizard from a position"""
@@ -296,41 +289,35 @@ class GameBoard:
                     self.wizards_on_board[position].remove(wizard)
                 if len(self.wizards_on_board[position]) == 0:
                     del self.wizards_on_board[position]
-            else:
-                # Handle legacy single wizard case
-                if self.wizards_on_board[position] == wizard:
-                    del self.wizards_on_board[position]
 
-    def get_wizard_at_position(self, position):
-        """Get wizards at a specific position"""
-        if position in self.wizards_on_board:
-            wizards = self.wizards_on_board[position]
-            return wizards if isinstance(wizards, list) else [wizards]
-        return []
-
+    # helper to get crystal count at any position (white or colored mines)
+    def get_crystals_at_position(self, position):
+        if position.startswith('mine_'):
+            mine_color = self.get_mine_color_from_position(position)
+            return self.mines[mine_color]['crystals'] if mine_color else 0
+        if position in self.positions:
+            return self.positions[position].get('crystals', 0)
+        return 0
+    
     def is_adjacent(self, pos1, pos2):
         """Check if two positions are adjacent"""
         return self.layout.is_adjacent(pos1, pos2)
-
-    def distance_to_healing_springs(self, position):
-        """Calculate distance to healing springs (center) using BFS"""
-        if position == 'center':
-            return 0
-        
-        visited = set()
-        queue = [(position, 0)]
-        
-        while queue:
-            current_pos, distance = queue.pop(0)
-            if current_pos in visited:
-                continue
-            visited.add(current_pos)
-            
-            if current_pos == 'center':
-                return distance
-            
-            for adjacent in self.get_adjacent_positions(current_pos):
-                if adjacent not in visited:
-                    queue.append((adjacent, distance + 1))
-        
-        return float('inf')  # Should never happen if board is connected
+    
+    def is_healing_springs(self, position):
+        """Check if a position is a healing springs (center position)"""
+        if position in self.positions:
+            return self.positions[position].get('type') == 'healing_springs'
+        return False
+    
+    def is_mine(self, position):
+        """Check if a position is a mine"""
+        return position.startswith('mine_')
+    
+    def get_wizard_at_position(self, position):
+        """Get list of wizards at a specific position"""
+        return self.wizards_on_board.get(position, [])
+    
+    def get_castable_positions(self, position):
+        """Get positions where spells can be cast from the given position"""
+        # For now, return adjacent positions - this may need refinement based on spell rules
+        return self.get_adjacent_positions(position)
