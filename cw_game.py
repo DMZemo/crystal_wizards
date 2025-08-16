@@ -239,12 +239,21 @@ class CrystalWizardsGame:
             self.action_log.append("...but no one was in range!")
 
         for target in targets:
+            # Store health before damage to calculate actual damage taken
+            health_before = target.health
             target.take_damage(damage, gui=gui, caster=player, game=self)
-            self.action_log.append(f"{target.color.title()} Wizard took {damage} damage.")
+            actual_damage_taken = health_before - target.health
+            
+            if actual_damage_taken < damage:
+                blocked_amount = damage - actual_damage_taken
+                self.action_log.append(f"{target.color.title()} Wizard blocked {blocked_amount} damage and took {actual_damage_taken} damage.")
+            else:
+                self.action_log.append(f"{target.color.title()} Wizard took {actual_damage_taken} damage.")
+                
             if target.health <= 0:
                 self.eliminate_player(target)
         
-        # FIXED: Proper crystal return logic using original crystal types
+        # FIXED: Proper crystal return logic - use original crystal colors
         self.return_crystals_to_board(spell_card.original_crystals_used, player.location)
         player.cards_laid_down.remove(spell_card)
         

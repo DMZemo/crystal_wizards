@@ -126,16 +126,23 @@ class BlockingDialog:
         self.caster = caster
         self.game = game
         self.visible = False
-        self.result = 0  # Amount of damage blocked
+        self.result = None  # Amount of damage blocked (None means still deciding)
         
         # UI state
         self.crystals_to_spend = {'red': 0, 'blue': 0, 'green': 0, 'yellow': 0, 'white': 0}
         self.max_crystals = min(damage, wizard.get_total_crystals_for_blocking())
         self.total_selected = 0
         
+        # Calculate dialog dimensions
+        sw, sh = self.screen.get_size()
+        self.dialog_w = int(sw * 0.7)
+        self.dialog_h = int(sh * 0.6)
+        self.dialog_x = (sw - self.dialog_w) // 2
+        self.dialog_y = (sh - self.dialog_h) // 2
+        
     def show(self):
         self.visible = True
-        self.result = 0
+        self.result = None
         
     def run_modal(self):
         """Run modal dialog until user confirms blocking choice"""
@@ -152,30 +159,7 @@ class BlockingDialog:
                         self.result = 0  # No blocking on escape
                         self.visible = False
                     elif event.key == pygame.K_RETURN:
-                        # Confirm current selection
-                        if self.total_selected > 0:
-                            # Manually spend the selected crystals
-                            crystals_spent = {}
-                            total_blocked = 0
-                            for color, amount in self.crystals_to_spend.items():
-                                if amount > 0:
-                                    available = self.wizard.crystals.get(color, 0)
-                                    actual_spent = min(amount, available)
-                                    if actual_spent > 0:
-                                        self.wizard.crystals[color] -= actual_spent
-                                        crystals_spent[color] = actual_spent
-                                        total_blocked += actual_spent
-                            
-                            # Return crystals to board if game reference available
-                            if self.game and crystals_spent:
-                                crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
-                                if crystals_to_return:
-                                    self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
-                            
-                            self.result = total_blocked
-                        else:
-                            self.result = 0
-                        self.visible = False
+                        self._confirm_blocking()
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     mx, my = event.pos
                     self._handle_mouse_click(mx, my)
@@ -185,25 +169,48 @@ class BlockingDialog:
             pygame.display.flip()
             clock.tick(60)
             
-        return self.result
+        return self.result if self.result is not None else 0
     
+    def _confirm_blocking(self):
+        """Confirm the current blocking selection and spend crystals"""
+        if self.total_selected > 0:
+            # Spend the selected crystals
+            crystals_spent = {}
+            total_blocked = 0
+            for color, amount in self.crystals_to_spend.items():
+                if amount > 0:
+                    available = self.wizard.crystals.get(color, 0)
+                    actual_spent = min(amount, available)
+                    if actual_spent > 0:
+                        self.wizard.crystals[color] -= actual_spent
+                        crystals_spent[color] = actual_spent
+                        total_blocked += actual_spent
+            
+            # Return crystals to board if game reference available
+            if self.game and crystals_spent:
+                crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
+                if crystals_to_return:
+                    self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
+            
+            self.result = total_blocked
+        else:
+            self.result = 0
+        self.visible = False
+
     def _handle_mouse_click(self, mx, my):
         """Handle mouse clicks in the blocking dialog"""
-        sw, sh = self.screen.get_size()
-        dialog_w, dialog_h = int(sw * 0.6), int(sh * 0.5)
-        dialog_x, dialog_y = (sw - dialog_w) // 2, (sh - dialog_h) // 2
-        
         # Crystal selection buttons (+ and - for each color)
         colors = ['red', 'blue', 'green', 'yellow', 'white']
-        button_y = dialog_y + 120
+        crystal_section_y = self.dialog_y + 180
         
         for i, color in enumerate(colors):
             if self.wizard.crystals.get(color, 0) == 0:
                 continue  # Skip colors the wizard doesn't have
                 
-            button_x = dialog_x + 50 + i * 90
-            plus_rect = pygame.Rect(button_x + 50, button_y, 25, 25)
-            minus_rect = pygame.Rect(button_x + 15, button_y, 25, 25)
+            # Calculate button positions for this color
+            crystal_x = self.dialog_x + 60 + i * 110
+            plus_rect = pygame.Rect(crystal_x + 70, crystal_section_y + 30, 30, 25)
+            minus_rect = pygame.Rect(crystal_x + 10, crystal_section_y + 30, 30, 25)
             
             if plus_rect.collidepoint(mx, my):
                 # Increase this color if possible
@@ -218,139 +225,172 @@ class BlockingDialog:
                     self.crystals_to_spend[color] -= 1
                     self.total_selected -= 1
         
-        # Block button
-        block_x = dialog_x + dialog_w // 2 - 80
-        block_y = dialog_y + dialog_h - 80
-        block_rect = pygame.Rect(block_x, block_y, 70, 35)
+        # Action buttons
+        button_y = self.dialog_y + self.dialog_h - 60
         
-        # Skip button
-        skip_x = dialog_x + dialog_w // 2 + 10
-        skip_y = dialog_y + dialog_h - 80
-        skip_rect = pygame.Rect(skip_x, skip_y, 70, 35)
+        # Block button
+        block_x = self.dialog_x + self.dialog_w // 2 - 120
+        block_rect = pygame.Rect(block_x, button_y, 100, 40)
+        
+        # Skip button  
+        skip_x = self.dialog_x + self.dialog_w // 2 + 20
+        skip_rect = pygame.Rect(skip_x, button_y, 100, 40)
         
         if block_rect.collidepoint(mx, my):
-            # Confirm blocking
-            if self.total_selected > 0:
-                # Manually spend the selected crystals
-                crystals_spent = {}
-                total_blocked = 0
-                for color, amount in self.crystals_to_spend.items():
-                    if amount > 0:
-                        available = self.wizard.crystals.get(color, 0)
-                        actual_spent = min(amount, available)
-                        if actual_spent > 0:
-                            self.wizard.crystals[color] -= actual_spent
-                            crystals_spent[color] = actual_spent
-                            total_blocked += actual_spent
-                
-                # Return crystals to board if game reference available
-                if self.game and crystals_spent:
-                    crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
-                    if crystals_to_return:
-                        self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
-                
-                self.result = total_blocked
-            else:
-                self.result = 0
-            self.visible = False
+            self._confirm_blocking()
         elif skip_rect.collidepoint(mx, my):
             # Skip blocking
             self.result = 0
             self.visible = False
         
     def render(self):
-        """Render the blocking dialog"""
+        """Render the improved blocking dialog with clear crystal selection"""
         sw, sh = self.screen.get_size()
         
         # Semi-transparent overlay
-        overlay = pygame.Surface((sw, sh))
-        overlay.set_alpha(128)
-        overlay.fill((0, 0, 0))
+        overlay = pygame.Surface((sw, sh), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
         self.screen.blit(overlay, (0, 0))
         
-        # Dialog background
-        dialog_w, dialog_h = int(sw * 0.5), int(sh * 0.4)
-        dialog_x, dialog_y = (sw - dialog_w) // 2, (sh - dialog_h) // 2
-        dialog_rect = pygame.Rect(dialog_x, dialog_y, dialog_w, dialog_h)
+        # Dialog background with rounded corners
+        dialog_rect = pygame.Rect(self.dialog_x, self.dialog_y, self.dialog_w, self.dialog_h)
+        pygame.draw.rect(self.screen, (45, 45, 65), dialog_rect, border_radius=15)
+        pygame.draw.rect(self.screen, (255, 255, 255), dialog_rect, 3, border_radius=15)
         
-        pygame.draw.rect(self.screen, (40, 40, 60), dialog_rect)
-        pygame.draw.rect(self.screen, (255, 255, 255), dialog_rect, 3)
+        # Title section
+        title_text = "⚔️ INCOMING ATTACK! ⚔️"
+        title_surface = pygame.font.Font(None, 36).render(title_text, True, (255, 100, 100))
+        title_x = self.dialog_x + (self.dialog_w - title_surface.get_width()) // 2
+        self.screen.blit(title_surface, (title_x, self.dialog_y + 20))
         
-        # Title
-        title_text = f"Incoming Attack!"
-        title_surface = self.font.render(title_text, True, (255, 255, 255))
-        title_x = dialog_x + (dialog_w - title_surface.get_width()) // 2
-        self.screen.blit(title_surface, (title_x, dialog_y + 15))
+        # Attack info section
+        attacker_name = getattr(self.caster, 'name', f"{self.caster.color.title()} Wizard")
+        defender_name = getattr(self.wizard, 'name', f"{self.wizard.color.title()} Wizard")
         
-        # Damage info
-        damage_text = f"{self.caster.name if hasattr(self.caster, 'name') else 'Enemy'} deals {self.damage} damage!"
-        damage_surface = self.font.render(damage_text, True, (255, 200, 200))
-        damage_x = dialog_x + (dialog_w - damage_surface.get_width()) // 2
-        self.screen.blit(damage_surface, (damage_x, dialog_y + 50))
+        attack_info = f"{attacker_name} attacks {defender_name} for {self.damage} damage!"
+        attack_surface = self.font.render(attack_info, True, (255, 200, 200))
+        attack_x = self.dialog_x + (self.dialog_w - attack_surface.get_width()) // 2
+        self.screen.blit(attack_surface, (attack_x, self.dialog_y + 70))
         
-        # Available crystals
-        available_text = f"Available crystals: {self.wizard.get_total_crystals_for_blocking()}"
-        available_surface = self.font.render(available_text, True, (200, 200, 255))
-        available_x = dialog_x + (dialog_w - available_surface.get_width()) // 2
-        self.screen.blit(available_surface, (available_x, dialog_y + 80))
+        # Defender's crystal reserves section
+        reserves_title = f"{defender_name}'s Crystal Reserves:"
+        reserves_surface = pygame.font.Font(None, 28).render(reserves_title, True, (200, 255, 200))
+        reserves_x = self.dialog_x + (self.dialog_w - reserves_surface.get_width()) // 2
+        self.screen.blit(reserves_surface, (reserves_x, self.dialog_y + 110))
         
-        # Crystal selection
-        selection_text = f"Crystals to spend: {self.crystals_to_spend}"
-        selection_surface = self.font.render(selection_text, True, (255, 255, 255))
-        selection_x = dialog_x + (dialog_w - selection_surface.get_width()) // 2
-        self.screen.blit(selection_surface, (selection_x, dialog_y + 110))
+        # Crystal selection area
+        colors = ['red', 'blue', 'green', 'yellow', 'white']
+        color_map = {
+            'red': (255, 100, 100),
+            'blue': (100, 150, 255),
+            'green': (100, 255, 100),
+            'yellow': (255, 255, 100),
+            'white': (255, 255, 255)
+        }
         
-        # Plus and minus buttons
-        plus_x = dialog_x + dialog_w - 120
-        plus_y = dialog_y + 120
-        minus_x = dialog_x + 80
-        minus_y = dialog_y + 120
+        crystal_section_y = self.dialog_y + 150
         
-        # Plus button
-        plus_color = (0, 150, 0) if self.crystals_to_spend < self.max_crystals else (100, 100, 100)
-        pygame.draw.rect(self.screen, plus_color, (plus_x, plus_y, 40, 30))
-        pygame.draw.rect(self.screen, (255, 255, 255), (plus_x, plus_y, 40, 30), 2)
-        plus_text = self.font.render("+", True, (255, 255, 255))
-        self.screen.blit(plus_text, (plus_x + 15, plus_y + 5))
+        for i, color in enumerate(colors):
+            available = self.wizard.crystals.get(color, 0)
+            if available == 0:
+                continue  # Skip colors the wizard doesn't have
+                
+            # Calculate positions for this crystal type
+            crystal_x = self.dialog_x + 60 + i * 110
+            
+            # Crystal color indicator
+            crystal_color = color_map[color]
+            pygame.draw.circle(self.screen, crystal_color, (crystal_x + 50, crystal_section_y + 15), 15)
+            pygame.draw.circle(self.screen, (255, 255, 255), (crystal_x + 50, crystal_section_y + 15), 15, 2)
+            
+            # Color label
+            color_label = color.title()
+            label_surface = pygame.font.Font(None, 20).render(color_label, True, (255, 255, 255))
+            label_x = crystal_x + 50 - label_surface.get_width() // 2
+            self.screen.blit(label_surface, (label_x, crystal_section_y + 35))
+            
+            # Available count
+            available_text = f"Have: {available}"
+            available_surface = pygame.font.Font(None, 18).render(available_text, True, (200, 200, 200))
+            available_x = crystal_x + 50 - available_surface.get_width() // 2
+            self.screen.blit(available_surface, (available_x, crystal_section_y + 55))
+            
+            # Selected count
+            selected = self.crystals_to_spend[color]
+            selected_text = f"Use: {selected}"
+            selected_color = (255, 255, 100) if selected > 0 else (150, 150, 150)
+            selected_surface = pygame.font.Font(None, 18).render(selected_text, True, selected_color)
+            selected_x = crystal_x + 50 - selected_surface.get_width() // 2
+            self.screen.blit(selected_surface, (selected_x, crystal_section_y + 75))
+            
+            # Plus button
+            plus_rect = pygame.Rect(crystal_x + 70, crystal_section_y + 30, 30, 25)
+            can_add = selected < available and self.total_selected < self.max_crystals
+            plus_color = (0, 150, 0) if can_add else (80, 80, 80)
+            pygame.draw.rect(self.screen, plus_color, plus_rect, border_radius=5)
+            pygame.draw.rect(self.screen, (255, 255, 255), plus_rect, 2, border_radius=5)
+            plus_text = pygame.font.Font(None, 24).render("+", True, (255, 255, 255))
+            plus_text_rect = plus_text.get_rect(center=plus_rect.center)
+            self.screen.blit(plus_text, plus_text_rect)
+            
+            # Minus button
+            minus_rect = pygame.Rect(crystal_x + 10, crystal_section_y + 30, 30, 25)
+            can_remove = selected > 0
+            minus_color = (150, 0, 0) if can_remove else (80, 80, 80)
+            pygame.draw.rect(self.screen, minus_color, minus_rect, border_radius=5)
+            pygame.draw.rect(self.screen, (255, 255, 255), minus_rect, 2, border_radius=5)
+            minus_text = pygame.font.Font(None, 24).render("-", True, (255, 255, 255))
+            minus_text_rect = minus_text.get_rect(center=minus_rect.center)
+            self.screen.blit(minus_text, minus_text_rect)
         
-        # Minus button  
-        minus_color = (150, 0, 0) if self.crystals_to_spend > 0 else (100, 100, 100)
-        pygame.draw.rect(self.screen, minus_color, (minus_x, minus_y, 40, 30))
-        pygame.draw.rect(self.screen, (255, 255, 255), (minus_x, minus_y, 40, 30), 2)
-        minus_text = self.font.render("-", True, (255, 255, 255))
-        self.screen.blit(minus_text, (minus_x + 17, minus_y + 5))
+        # Summary section
+        summary_y = self.dialog_y + 280
         
-        # Result preview
+        # Blocking summary
         final_damage = max(0, self.damage - self.total_selected)
-        result_text = f"Final damage: {final_damage} (blocked: {self.total_selected})"
-        result_surface = self.font.render(result_text, True, (255, 255, 100))
-        result_x = dialog_x + (dialog_w - result_surface.get_width()) // 2
-        self.screen.blit(result_surface, (result_x, dialog_y + 160))
+        summary_text = f"Crystals to spend: {self.total_selected} / {self.max_crystals}"
+        summary_surface = pygame.font.Font(None, 26).render(summary_text, True, (255, 255, 100))
+        summary_x = self.dialog_x + (self.dialog_w - summary_surface.get_width()) // 2
+        self.screen.blit(summary_surface, (summary_x, summary_y))
+        
+        # Damage preview
+        damage_preview = f"Final damage: {final_damage} (blocked: {self.total_selected})"
+        preview_color = (100, 255, 100) if self.total_selected > 0 else (255, 200, 200)
+        preview_surface = pygame.font.Font(None, 24).render(damage_preview, True, preview_color)
+        preview_x = self.dialog_x + (self.dialog_w - preview_surface.get_width()) // 2
+        self.screen.blit(preview_surface, (preview_x, summary_y + 30))
         
         # Action buttons
-        block_x = dialog_x + dialog_w // 2 - 80
-        block_y = dialog_y + dialog_h - 80
-        skip_x = dialog_x + dialog_w // 2 + 10
-        skip_y = dialog_y + dialog_h - 80
+        button_y = self.dialog_y + self.dialog_h - 60
         
         # Block button
-        block_color = (0, 100, 200) if self.total_selected > 0 else (100, 100, 100)
-        pygame.draw.rect(self.screen, block_color, (block_x, block_y, 70, 35))
-        pygame.draw.rect(self.screen, (255, 255, 255), (block_x, block_y, 70, 35), 2)
-        block_text = self.font.render("Block", True, (255, 255, 255))
-        self.screen.blit(block_text, (block_x + 15, block_y + 8))
+        block_x = self.dialog_x + self.dialog_w // 2 - 120
+        block_rect = pygame.Rect(block_x, button_y, 100, 40)
+        block_enabled = True  # Always allow blocking (even 0 crystals)
+        block_color = (0, 120, 200) if block_enabled else (80, 80, 80)
+        pygame.draw.rect(self.screen, block_color, block_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (255, 255, 255), block_rect, 2, border_radius=8)
         
-        # Skip button
-        pygame.draw.rect(self.screen, (150, 50, 50), (skip_x, skip_y, 70, 35))
-        pygame.draw.rect(self.screen, (255, 255, 255), (skip_x, skip_y, 70, 35), 2)
-        skip_text = self.font.render("Skip", True, (255, 255, 255))
-        self.screen.blit(skip_text, (skip_x + 20, skip_y + 8))
+        block_text = "Confirm" if self.total_selected > 0 else "Block None"
+        block_surface = pygame.font.Font(None, 22).render(block_text, True, (255, 255, 255))
+        block_text_rect = block_surface.get_rect(center=block_rect.center)
+        self.screen.blit(block_surface, block_text_rect)
+        
+        # Skip button (same as Block None, but more explicit)
+        skip_x = self.dialog_x + self.dialog_w // 2 + 20
+        skip_rect = pygame.Rect(skip_x, button_y, 100, 40)
+        pygame.draw.rect(self.screen, (150, 50, 50), skip_rect, border_radius=8)
+        pygame.draw.rect(self.screen, (255, 255, 255), skip_rect, 2, border_radius=8)
+        
+        skip_surface = pygame.font.Font(None, 22).render("Skip", True, (255, 255, 255))
+        skip_text_rect = skip_surface.get_rect(center=skip_rect.center)
+        self.screen.blit(skip_surface, skip_text_rect)
         
         # Instructions
-        instruction_text = "Use +/- buttons, arrow keys, or Enter to confirm"
-        instruction_surface = pygame.font.Font(None, 20).render(instruction_text, True, (180, 180, 180))
-        instruction_x = dialog_x + (dialog_w - instruction_surface.get_width()) // 2
-        self.screen.blit(instruction_surface, (instruction_x, dialog_y + dialog_h - 25))
+        instruction_text = "Click +/- to select crystals, then Confirm or Skip. Press Enter to confirm."
+        instruction_surface = pygame.font.Font(None, 18).render(instruction_text, True, (180, 180, 180))
+        instruction_x = self.dialog_x + (self.dialog_w - instruction_surface.get_width()) // 2
+        self.screen.blit(instruction_surface, (instruction_x, self.dialog_y + self.dialog_h - 20))
 
 
 
