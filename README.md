@@ -1,7 +1,7 @@
 # crystal_wizards
 Game Dev
 
-# Download all the files and put all WAV files in a "Sounds" Folder in the same folder as the other files.
+# Download the zip file
 
 # Make sure you have pygame installed.
 
