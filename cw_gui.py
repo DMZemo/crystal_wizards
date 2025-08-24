@@ -92,7 +92,7 @@ class QuitConfirmDialog:
 
         # Text
         title = self.font.render("Quit Crystal Wizards?", True, COLORS['black'])
-        subtitle = pygame.font.Font(None, int(h * 0.18)).render(
+        subtitle = pygame.font.Font(None, int(h * 0.36)).render(
             "Are you sure you want to quit?", True, COLORS['dark_grey']
         )
         self.screen.blit(title, title.get_rect(center=(x + w // 2, y + int(h * 0.3))))
@@ -112,8 +112,8 @@ class QuitConfirmDialog:
         pygame.draw.rect(self.screen, COLORS['red'], self._btn_no, border_radius=8)
         pygame.draw.rect(self.screen, COLORS['black'], self._btn_no, 2, border_radius=8)
 
-        yes_text = pygame.font.Font(None, int(btn_h * 0.5)).render("Yes", True, COLORS['white'])
-        no_text = pygame.font.Font(None, int(btn_h * 0.5)).render("No", True, COLORS['white'])
+        yes_text = pygame.font.Font(None, int(btn_h * 1.0)).render("Yes", True, COLORS['white'])
+        no_text = pygame.font.Font(None, int(btn_h * 1.0)).render("No", True, COLORS['white'])
         self.screen.blit(yes_text, yes_text.get_rect(center=self._btn_yes.center))
         self.screen.blit(no_text, no_text.get_rect(center=self._btn_no.center))
 
@@ -259,7 +259,7 @@ class BlockingDialog:
         
         # Title section
         title_text = "⚔️ INCOMING ATTACK! ⚔️"
-        title_surface = pygame.font.Font(None, 36).render(title_text, True, (255, 100, 100))
+        title_surface = pygame.font.Font(None, 72).render(title_text, True, (255, 100, 100))
         title_x = self.dialog_x + (self.dialog_w - title_surface.get_width()) // 2
         self.screen.blit(title_surface, (title_x, self.dialog_y + 20))
         
@@ -274,7 +274,7 @@ class BlockingDialog:
         
         # Defender's crystal reserves section
         reserves_title = f"{defender_name}'s Crystal Reserves:"
-        reserves_surface = pygame.font.Font(None, 28).render(reserves_title, True, (200, 255, 200))
+        reserves_surface = pygame.font.Font(None, 56).render(reserves_title, True, (200, 255, 200))
         reserves_x = self.dialog_x + (self.dialog_w - reserves_surface.get_width()) // 2
         self.screen.blit(reserves_surface, (reserves_x, self.dialog_y + 110))
         
@@ -305,13 +305,13 @@ class BlockingDialog:
             
             # Color label
             color_label = color.title()
-            label_surface = pygame.font.Font(None, 20).render(color_label, True, (255, 255, 255))
+            label_surface = pygame.font.Font(None, 40).render(color_label, True, (255, 255, 255))
             label_x = crystal_x + 50 - label_surface.get_width() // 2
             self.screen.blit(label_surface, (label_x, crystal_section_y + 35))
             
             # Available count
             available_text = f"Have: {available}"
-            available_surface = pygame.font.Font(None, 18).render(available_text, True, (200, 200, 200))
+            available_surface = pygame.font.Font(None, 36).render(available_text, True, (200, 200, 200))
             available_x = crystal_x + 50 - available_surface.get_width() // 2
             self.screen.blit(available_surface, (available_x, crystal_section_y + 55))
             
@@ -319,7 +319,7 @@ class BlockingDialog:
             selected = self.crystals_to_spend[color]
             selected_text = f"Use: {selected}"
             selected_color = (255, 255, 100) if selected > 0 else (150, 150, 150)
-            selected_surface = pygame.font.Font(None, 18).render(selected_text, True, selected_color)
+            selected_surface = pygame.font.Font(None, 36).render(selected_text, True, selected_color)
             selected_x = crystal_x + 50 - selected_surface.get_width() // 2
             self.screen.blit(selected_surface, (selected_x, crystal_section_y + 75))
             
@@ -329,7 +329,7 @@ class BlockingDialog:
             plus_color = (0, 150, 0) if can_add else (80, 80, 80)
             pygame.draw.rect(self.screen, plus_color, plus_rect, border_radius=5)
             pygame.draw.rect(self.screen, (255, 255, 255), plus_rect, 2, border_radius=5)
-            plus_text = pygame.font.Font(None, 24).render("+", True, (255, 255, 255))
+            plus_text = pygame.font.Font(None, 48).render("+", True, (255, 255, 255))
             plus_text_rect = plus_text.get_rect(center=plus_rect.center)
             self.screen.blit(plus_text, plus_text_rect)
             
@@ -339,7 +339,7 @@ class BlockingDialog:
             minus_color = (150, 0, 0) if can_remove else (80, 80, 80)
             pygame.draw.rect(self.screen, minus_color, minus_rect, border_radius=5)
             pygame.draw.rect(self.screen, (255, 255, 255), minus_rect, 2, border_radius=5)
-            minus_text = pygame.font.Font(None, 24).render("-", True, (255, 255, 255))
+            minus_text = pygame.font.Font(None, 48).render("-", True, (255, 255, 255))
             minus_text_rect = minus_text.get_rect(center=minus_rect.center)
             self.screen.blit(minus_text, minus_text_rect)
         
@@ -349,14 +349,14 @@ class BlockingDialog:
         # Blocking summary
         final_damage = max(0, self.damage - self.total_selected)
         summary_text = f"Crystals to spend: {self.total_selected} / {self.max_crystals}"
-        summary_surface = pygame.font.Font(None, 26).render(summary_text, True, (255, 255, 100))
+        summary_surface = pygame.font.Font(None, 52).render(summary_text, True, (255, 255, 100))
         summary_x = self.dialog_x + (self.dialog_w - summary_surface.get_width()) // 2
         self.screen.blit(summary_surface, (summary_x, summary_y))
         
         # Damage preview
         damage_preview = f"Final damage: {final_damage} (blocked: {self.total_selected})"
         preview_color = (100, 255, 100) if self.total_selected > 0 else (255, 200, 200)
-        preview_surface = pygame.font.Font(None, 24).render(damage_preview, True, preview_color)
+        preview_surface = pygame.font.Font(None, 48).render(damage_preview, True, preview_color)
         preview_x = self.dialog_x + (self.dialog_w - preview_surface.get_width()) // 2
         self.screen.blit(preview_surface, (preview_x, summary_y + 30))
         
@@ -372,7 +372,7 @@ class BlockingDialog:
         pygame.draw.rect(self.screen, (255, 255, 255), block_rect, 2, border_radius=8)
         
         block_text = "Confirm" if self.total_selected > 0 else "Block None"
-        block_surface = pygame.font.Font(None, 22).render(block_text, True, (255, 255, 255))
+        block_surface = pygame.font.Font(None, 44).render(block_text, True, (255, 255, 255))
         block_text_rect = block_surface.get_rect(center=block_rect.center)
         self.screen.blit(block_surface, block_text_rect)
         
@@ -382,13 +382,13 @@ class BlockingDialog:
         pygame.draw.rect(self.screen, (150, 50, 50), skip_rect, border_radius=8)
         pygame.draw.rect(self.screen, (255, 255, 255), skip_rect, 2, border_radius=8)
         
-        skip_surface = pygame.font.Font(None, 22).render("Skip", True, (255, 255, 255))
+        skip_surface = pygame.font.Font(None, 44).render("Skip", True, (255, 255, 255))
         skip_text_rect = skip_surface.get_rect(center=skip_rect.center)
         self.screen.blit(skip_surface, skip_text_rect)
         
         # Instructions
         instruction_text = "Click +/- to select crystals, then Confirm or Skip. Press Enter to confirm."
-        instruction_surface = pygame.font.Font(None, 18).render(instruction_text, True, (180, 180, 180))
+        instruction_surface = pygame.font.Font(None, 36).render(instruction_text, True, (180, 180, 180))
         instruction_x = self.dialog_x + (self.dialog_w - instruction_surface.get_width()) // 2
         self.screen.blit(instruction_surface, (instruction_x, self.dialog_y + self.dialog_h - 20))
 
@@ -412,9 +412,9 @@ class GameGUI:
         pygame.display.set_caption("Crystal Wizards")
 
         pygame.font.init()
-        self.font_small = pygame.font.Font(None, 20)
-        self.font_medium = pygame.font.Font(None, 24)
-        self.font_large = pygame.font.Font(None, 32)
+        self.font_small = pygame.font.Font(None, 30)
+        self.font_medium = pygame.font.Font(None, 40)
+        self.font_large = pygame.font.Font(None, 60)
 
         # Board layout
         self.board_center_x = self.screen_width // 2 - 200
@@ -1312,7 +1312,7 @@ class GameGUI:
         pygame.draw.rect(card_surface, border_color, (0, 0, width, height), border_width, border_radius=8)
 
         # Draw damage number at top center
-        damage_font_size = int(height * 0.15)
+        damage_font_size = int(height * 0.30)
         damage_font = pygame.font.Font(None, damage_font_size)
         damage_text = damage_font.render(str(card.get_damage()), True, COLORS['black'])
         damage_rect = damage_text.get_rect(center=(width // 2, damage_font_size // 2 + 10))
@@ -1321,7 +1321,7 @@ class GameGUI:
         # Draw crystal costs (always visible, no rotation)
         y_offset = height // 3
         crystal_size = max(6, int(width * 0.08))
-        font_size = max(10, int(width * 0.15))
+        font_size = max(20, int(width * 0.30))
         cost_font = pygame.font.Font(None, font_size)
 
         for color, cost in card.cost.items():
@@ -1384,7 +1384,7 @@ class GameGUI:
         crystal_area_x = int(self.screen_width * 0.75)
         crystal_area_y = int(self.screen_height * 0.45)
 
-        label_font = pygame.font.Font(None, 20)
+        label_font = pygame.font.Font(None, 40)
         crystal_label = label_font.render("Place Crystals:", True, COLORS['black'])
         self.screen.blit(crystal_label, (crystal_area_x, crystal_area_y - 25))
 
@@ -1439,7 +1439,7 @@ class GameGUI:
             
             # Opponent name text
             opponent_name = self.display_name(opponent)
-            name_font = pygame.font.Font(None, 18)
+            name_font = pygame.font.Font(None, 36)
             name_text = name_font.render(opponent_name, True, COLORS['white'])
             name_rect = name_text.get_rect(center=(area_x + area_width // 2, opponent_y + header_height // 2))
             self.screen.blit(name_text, name_rect)
@@ -1505,7 +1505,7 @@ class GameGUI:
         pygame.draw.rect(card_surface, border_color, (0, 0, width, height), border_width)
         
         # Draw damage value at top
-        damage_font = pygame.font.Font(None, max(16, int(height * 0.15)))
+        damage_font = pygame.font.Font(None, max(32, int(height * 0.30)))
         damage_text = damage_font.render(str(card.get_damage()), True, COLORS['black'])
         damage_rect = damage_text.get_rect(center=(width // 2, height // 8))
         card_surface.blit(damage_text, damage_rect)
@@ -1513,7 +1513,7 @@ class GameGUI:
         # Draw crystal costs
         y_offset = height // 4
         crystal_size = max(4, int(width * 0.08))
-        cost_font_size = max(10, int(width * 0.15))
+        cost_font_size = max(20, int(width * 0.30))
         cost_font = pygame.font.Font(None, cost_font_size)
         
         for color, cost in card.cost.items():
@@ -1552,7 +1552,7 @@ class GameGUI:
         # Progress percentage text (very small)
         if height > 60:  # Only show percentage if card is tall enough
             progress_text = f"{int(progress * 100)}%"
-            progress_font = pygame.font.Font(None, max(8, int(height * 0.08)))
+            progress_font = pygame.font.Font(None, max(16, int(height * 0.16)))
             progress_surface = progress_font.render(progress_text, True, COLORS['black'])
             card_surface.blit(progress_surface, (2, bar_y - 12))
         
@@ -1620,12 +1620,12 @@ class GameGUI:
         overlay.set_alpha(128)
         self.screen.blit(overlay, (0, 0))
 
-        game_over_font = pygame.font.Font(None, int(self.screen_height * 0.08))
+        game_over_font = pygame.font.Font(None, int(self.screen_height * 0.16))
         game_over_text = game_over_font.render("GAME OVER", True, COLORS['white'])
         game_over_rect = game_over_text.get_rect(center=(self.screen_width // 2, self.screen_height // 2 - 100))
         self.screen.blit(game_over_text, game_over_rect)
 
-        winner_font = pygame.font.Font(None, int(self.screen_height * 0.05))
+        winner_font = pygame.font.Font(None, int(self.screen_height * 0.10))
         winner = self.game.get_winner()
         if winner:
             label = f"{self.display_name(winner)} Wins!"
