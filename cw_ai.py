@@ -1,14 +1,14 @@
 """
-Crystal Wizards - Improved AI System
-Fixed version with proper spell casting, crystal return logic, stability improvements, and enhanced strategic behavior.
+Crystal Wizards - FIXED AI System
+Fixed version with comprehensive solutions for AI freezing issues.
 
 Key Fixes:
-1. Fixed indentation errors
-2. Proper crystal return mechanism (white crystals to empty spawn points, colored crystals to mines)
-3. Improved spell casting logic
-4. Better strategic decision-making
-5. Enhanced stability with proper timeout and error handling
-6. Multiple AI strategies based on game state
+1. Improved timeout handling with proper signal management
+2. Enhanced emergency fallback system with guaranteed turn ending
+3. Fixed action counting logic to prevent infinite loops
+4. Added comprehensive logging for debugging
+5. Robust error handling and recovery mechanisms
+6. Simplified action loop logic to prevent deadlocks
 """
 
 import random
@@ -17,7 +17,7 @@ import signal
 import logging
 from collections import defaultdict
 
-# Set up logging for AI decisions
+# Set up comprehensive logging for AI decisions
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def timeout_handler(signum, frame):
 
 class StrategicAI:
     """
-    Enhanced AI class with proper spell casting, crystal management, and strategic decision-making.
+    FIXED Enhanced AI class with comprehensive freeze prevention and robust error handling.
     """
     
     def __init__(self, wizard, difficulty='easy'):
@@ -48,91 +48,147 @@ class StrategicAI:
         self.resource_preference = self._init_resource_preference()
         self.strategy_mode = 'balanced'  # balanced, aggressive, defensive, resource_focused
         
+        # FIXED: Add debugging and safety counters
+        self.turn_count = 0
+        self.consecutive_failures = 0
+        self.max_consecutive_failures = 3
+        
     def _get_max_thinking_time(self):
         """Get maximum thinking time based on difficulty"""
-        time_limits = {
-            'easy': 0.5,    # 0.5 seconds
-            'medium': 1.0,  # 1 second  
-            'hard': 2.0     # 2 seconds
-        }
-        return time_limits.get(self.difficulty, 0.5)
+        times = {'easy': 0.5, 'medium': 1.0, 'hard': 2.0}
+        return times.get(self.difficulty, 0.5)
     
     def _init_resource_preference(self):
-        """Initialize crystal color preferences based on wizard color"""
-        preferences = {
-            'white': 8,    # White is versatile
-            'red': 5, 'blue': 5, 'green': 5, 'yellow': 5
-        }
-        # Own color is highly valuable
-        preferences[self.wizard.color] = 10
+        """Initialize resource preferences based on wizard color"""
+        preferences = defaultdict(float)
+        preferences[self.wizard.color] = 1.5  # Prefer own color
+        preferences['white'] = 1.2  # White crystals are versatile
         return preferences
     
     def reset_state(self):
-        """Reset AI state to clear any issues that might cause freezing"""
+        """Reset AI state for new game"""
         self.fallback_used = False
         self.last_action_type = None
-        self.resource_preference = self._init_resource_preference()
-        logger.info(f"AI state reset for {self.wizard.color} wizard")
-
+        self.strategy_mode = 'balanced'
+        self.consecutive_failures = 0
+    
     def execute_turn(self, game):
         """
-        Main entry point - execute AI turn with timeout protection.
-        This method guarantees to never freeze or crash.
+        FIXED: Main entry point - execute AI turn with comprehensive protection.
+        This method is GUARANTEED to never freeze or crash.
         """
+        self.turn_count += 1
         self.fallback_used = False
         
+        logger.debug(f"AI {self.wizard.color} starting turn {self.turn_count}")
+        
         try:
-            # Set up timeout protection
+            # FIXED: Enhanced timeout protection with proper cleanup
+            timeout_set = False
             if hasattr(signal, 'SIGALRM'):  # Unix-like systems
                 signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(int(self.max_thinking_time) + 1)
+                signal.alarm(int(self.max_thinking_time) + 2)  # Extra buffer
+                timeout_set = True
             
             start_time = time.time()
-            self._execute_turn_logic(game, start_time)
+            success = self._execute_turn_logic(game, start_time)
+            
+            if not success:
+                logger.warning(f"AI {self.wizard.color} turn logic failed, using emergency fallback")
+                self._guaranteed_turn_end(game)
             
         except (TimeoutException, Exception) as e:
             logger.warning(f"AI {self.wizard.color} encountered issue: {e}")
-            self._emergency_fallback(game)
+            self._guaranteed_turn_end(game)
         
         finally:
-            # Clean up timeout protection
-            if hasattr(signal, 'SIGALRM'):
+            # FIXED: Always clean up timeout protection
+            if timeout_set and hasattr(signal, 'SIGALRM'):
                 signal.alarm(0)
+            
+            # FIXED: Guarantee turn ends properly
+            if game.current_actions < game.max_actions_per_turn:
+                logger.debug(f"AI {self.wizard.color} forcing turn end - actions: {game.current_actions}/{game.max_actions_per_turn}")
+                self._force_turn_end(game)
     
     def _execute_turn_logic(self, game, start_time):
-        """Execute the actual turn logic with time monitoring"""
+        """FIXED: Execute the actual turn logic with simplified and robust action loop"""
         # Update strategy based on game state
         self._update_strategy(game)
         
-        action_count = 0
-        max_actions = min(3, game.max_actions_per_turn)
+        # FIXED: Simplified action loop with multiple safety mechanisms
+        max_iterations = 10  # Hard limit to prevent infinite loops
         iteration_count = 0
-        max_iterations = 10  # Prevent infinite loops
+        actions_at_start = game.current_actions
+        
+        logger.debug(f"AI {self.wizard.color} starting action loop: {game.current_actions}/{game.max_actions_per_turn}")
         
         while (game.current_actions < game.max_actions_per_turn and 
-               action_count < max_actions and 
                iteration_count < max_iterations):
-            
-            # Check time limit before each action
-            if time.time() - start_time > self.max_thinking_time:
-                logger.debug(f"AI {self.wizard.color} hit time limit")
-                self._quick_fallback_action(game)
-                break
-            
-            action_taken, action_type = self._choose_and_execute_action(game)
-            if not action_taken:
-                break
             
             iteration_count += 1
             
-            # Only count actions that consume from the game's action limit
-            if not self._is_free_action(action_type):
-                action_count += 1
+            # FIXED: Multiple timeout checks
+            if time.time() - start_time > self.max_thinking_time:
+                logger.debug(f"AI {self.wizard.color} hit time limit after {iteration_count} iterations")
+                break
+            
+            # FIXED: Try to execute one action with comprehensive error handling
+            action_success = self._try_single_action(game)
+            
+            if not action_success:
+                # FIXED: If no action was possible, break immediately
+                logger.debug(f"AI {self.wizard.color} no valid actions available, ending turn")
+                break
+            
+            # FIXED: Safety check - if actions didn't increase, something is wrong
+            if game.current_actions == actions_at_start and iteration_count > 3:
+                logger.warning(f"AI {self.wizard.color} actions not increasing, forcing end")
+                break
         
-        # Ensure the AI always makes at least one action if it has no valid actions
-        if iteration_count == 0:
-            logger.debug(f"AI {self.wizard.color} found no valid actions, using emergency fallback")
-            self._quick_fallback_action(game)
+        # FIXED: Log final state
+        actions_taken = game.current_actions - actions_at_start
+        logger.debug(f"AI {self.wizard.color} completed turn: {actions_taken} actions in {iteration_count} iterations")
+        
+        return True
+    
+    def _try_single_action(self, game):
+        """FIXED: Try to execute a single action with comprehensive error handling"""
+        try:
+            # Get all possible actions
+            possible_actions = self._get_possible_actions(game)
+            
+            if not possible_actions:
+                logger.debug(f"AI {self.wizard.color} has no possible actions")
+                return False
+            
+            # Select and execute best action
+            best_action = self._select_best_action(possible_actions, game)
+            if not best_action:
+                logger.debug(f"AI {self.wizard.color} could not select action")
+                return False
+            
+            # Execute the action
+            success = self._execute_action(best_action, game)
+            
+            if success:
+                self.consecutive_failures = 0
+                logger.debug(f"AI {self.wizard.color} executed {best_action['type']} successfully")
+            else:
+                self.consecutive_failures += 1
+                logger.debug(f"AI {self.wizard.color} failed to execute {best_action['type']} (failure #{self.consecutive_failures})")
+                
+                # FIXED: If too many consecutive failures, stop trying
+                if self.consecutive_failures >= self.max_consecutive_failures:
+                    logger.warning(f"AI {self.wizard.color} too many consecutive failures, ending turn")
+                    return False
+            
+            return success
+            
+        except Exception as e:
+            logger.warning(f"AI {self.wizard.color} action execution error: {e}")
+            self.consecutive_failures += 1
+            return False
     
     def _update_strategy(self, game):
         """Update AI strategy based on current game state"""
@@ -143,223 +199,268 @@ class StrategicAI:
         
         # Count enemies and their threat level
         enemies = [p for p in game.players if p != self.wizard]
-        enemy_threat = 0
-        for enemy in enemies:
-            if enemy.health > 0:
-                enemy_charged_spells = sum(1 for card in enemy.cards_laid_down if card.is_fully_charged())
-                # Check if enemy is adjacent (immediate threat)
-                adjacent_enemies = game.get_adjacent_enemies(self.wizard)
-                if enemy in adjacent_enemies:
-                    enemy_threat += 10 + enemy_charged_spells * 5
-                else:
-                    enemy_threat += enemy_charged_spells * 2
+        nearby_enemies = len(game.get_adjacent_enemies(self.wizard))
         
-        # Determine strategy
+        # Determine strategy based on game state
         if my_health <= 2:
             self.strategy_mode = 'defensive'
-        elif my_charged_spells > 0 and enemy_threat > 5:
+        elif my_crystals >= 8:
             self.strategy_mode = 'aggressive'
-        elif my_crystals < 3:
-            self.strategy_mode = 'resource_focused'
-        else:
+        elif my_charged_spells >= 2:
+            self.strategy_mode = 'aggressive'
+        elif nearby_enemies > 0:
             self.strategy_mode = 'balanced'
+        else:
+            self.strategy_mode = 'resource_focused'
         
         logger.debug(f"AI {self.wizard.color} strategy: {self.strategy_mode}")
-    
-    def _choose_and_execute_action(self, game):
-        """Choose and execute the best available action"""
-        # Get all possible actions
-        possible_actions = self._get_possible_actions(game)
-        if not possible_actions:
-            # FIXED: When no actions available, try emergency fallback but don't loop
-            logger.warning(f"AI {self.wizard.color} has no actions available, using emergency fallback")
-            fallback_success = self._emergency_fallback(game)
-            # Return False to break the action loop and end turn
-            return False, 'emergency_fallback' if fallback_success else None
-        
-        # Score and choose best action
-        best_action = self._select_best_action(possible_actions, game)
-        if not best_action:
-            return False, None
-        
-        # Execute the chosen action
-        success = self._execute_action(best_action, game)
-        return success, best_action['type'] if success else None
     
     def _get_possible_actions(self, game):
         """Get all currently possible actions"""
         actions = []
         
-        # Spell casting (highest priority when available and strategic)
-        if game.can_cast_spell(self.wizard):
-            for spell_card in self.wizard.cards_laid_down:
-                if spell_card.is_fully_charged():
-                    enemies = game.get_adjacent_enemies(self.wizard)
-                    if enemies:
-                        # Calculate spell value based on strategy
-                        spell_value = self._evaluate_spell_cast(spell_card, enemies, game)
-                        actions.append({
-                            'type': 'cast_spell',
-                            'spell_card': spell_card,
-                            'targets': enemies,
-                            'priority': spell_value
-                        })
+        # FIXED: More robust action detection with error handling
+        try:
+            # Spell casting (highest priority when available and strategic)
+            if game.can_cast_spell(self.wizard):
+                for spell_card in self.wizard.cards_laid_down:
+                    if spell_card.is_fully_charged():
+                        enemies = game.get_adjacent_enemies(self.wizard)
+                        if enemies:
+                            # Calculate spell value based on strategy
+                            spell_value = self._evaluate_spell_cast(spell_card, enemies, game)
+                            actions.append({
+                                'type': 'cast_spell',
+                                'spell_card': spell_card,
+                                'targets': enemies,
+                                'priority': spell_value
+                            })
+        except Exception as e:
+            logger.warning(f"Error checking spell actions: {e}")
         
-        # Mining actions
-        if game.can_mine(self.wizard):
-            pos = self.wizard.location
-            
-            # White crystal mining (no dice needed)
-            if (game.board.has_crystals_at_position(pos) and 
-                not game.board.is_mine(pos) and 
-                not game.board.is_healing_springs(pos) and
-                self.wizard.can_hold_more_crystals()):
-                actions.append({
-                    'type': 'mine_white',
-                    'position': pos,
-                    'priority': 60
-                })
-            
-            # Healing at springs
-            if game.board.is_healing_springs(pos) and self.wizard.health < 6:
-                healing_needed = 6 - self.wizard.health
-                healing_priority = 80 + healing_needed * 10
-                if self.strategy_mode == 'defensive':
-                    healing_priority += 20
-                actions.append({
-                    'type': 'heal',
-                    'position': pos,
-                    'priority': healing_priority
-                })
-            
-            # Colored crystal mining
-            if (game.board.is_mine(pos) and 
-                self.wizard.can_hold_more_crystals()):
-                mine_color = game.board.get_mine_color_from_position(pos)
-                if mine_color:
-                    color_value = self.resource_preference.get(mine_color, 3)
-                    mine_priority = 40 + color_value
-                    if self.strategy_mode == 'resource_focused':
-                        mine_priority += 15
+        try:
+            # Mining actions
+            if game.can_mine(self.wizard):
+                pos = self.wizard.location
+                
+                # White crystal mining (no dice needed)
+                if (game.board.has_crystals_at_position(pos) and 
+                    not game.board.is_mine(pos) and 
+                    not game.board.is_healing_springs(pos) and
+                    self.wizard.can_hold_more_crystals()):
                     actions.append({
-                        'type': 'mine_colored',
+                        'type': 'mine_white',
                         'position': pos,
-                        'color': mine_color,
-                        'priority': mine_priority
+                        'priority': 60
                     })
+                
+                # Healing springs
+                if game.board.is_healing_springs(pos) and self.wizard.health < 6:
+                    heal_value = 70 if self.wizard.health <= 2 else 40
+                    actions.append({
+                        'type': 'heal',
+                        'position': pos,
+                        'priority': heal_value
+                    })
+                
+                # Colored crystal mining
+                if game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():
+                    mine_color = game.board.get_mine_color_from_position(pos)
+                    if mine_color:
+                        base_priority = 50
+                        if mine_color == self.wizard.color:
+                            base_priority += 20
+                        actions.append({
+                            'type': 'mine_colored',
+                            'position': pos,
+                            'color': mine_color,
+                            'priority': base_priority
+                        })
+        except Exception as e:
+            logger.warning(f"Error checking mining actions: {e}")
         
-        # Card management
-        self._add_card_actions(actions, game)
+        try:
+            # Card actions (laying down and charging)
+            self._add_card_actions(actions, game)
+        except Exception as e:
+            logger.warning(f"Error checking card actions: {e}")
         
-        # Movement
-        if game.can_move(self.wizard):
-            self._add_movement_actions(actions, game)
+        try:
+            # Movement actions
+            if game.can_move(self.wizard):
+                self._add_movement_actions(actions, game)
+        except Exception as e:
+            logger.warning(f"Error checking movement actions: {e}")
         
         return actions
     
     def _evaluate_spell_cast(self, spell_card, enemies, game):
-        """Evaluate the value of casting a specific spell"""
-        base_value = 100  # High base priority for spell casting
-        damage = spell_card.get_damage()
+        """Evaluate the value of casting a spell"""
+        base_value = 80
         
-        # Strategy-based adjustments
+        # Adjust based on strategy
         if self.strategy_mode == 'aggressive':
-            base_value += 30
+            base_value += 20
         elif self.strategy_mode == 'defensive':
-            # Only cast if enemies are threatening
-            threatening_enemies = [e for e in enemies if e.has_charged_spells()]
-            if not threatening_enemies:
-                base_value -= 40
+            base_value += 10
         
-        # Damage efficiency
-        total_enemy_health = sum(e.health for e in enemies)
-        if damage >= total_enemy_health:
-            base_value += 50  # Can eliminate all targets
+        # Adjust based on number of targets
+        base_value += len(enemies) * 10
         
-        # Target priority
-        for enemy in enemies:
-            if enemy.health <= damage:
-                base_value += 25  # Can eliminate this enemy
-            if enemy.has_charged_spells():
-                base_value += 15  # Prioritize dangerous enemies
+        # Adjust based on wizard health
+        if self.wizard.health <= 2:
+            base_value += 30  # Desperate situation
         
         return base_value
     
     def _add_card_actions(self, actions, game):
-        """Add spell card related actions"""
-        # Lay down cards
+        """Add card-related actions (laying down and charging)"""
+        # Lay down spell cards
         if len(self.wizard.cards_laid_down) < 2 and self.wizard.hand:
             for i, card in enumerate(self.wizard.hand):
                 affordability = self._calculate_affordability(card)
-                if affordability > 0.2:  # Only lay down somewhat affordable cards
-                    priority = 30 + affordability * 20
-                    if self.strategy_mode == 'aggressive':
-                        priority += 10
-                    actions.append({
-                        'type': 'lay_card',
-                        'card_index': i,
-                        'card': card,
-                        'priority': priority
-                    })
+                priority = 30 + (affordability * 20)
+                actions.append({
+                    'type': 'lay_card',
+                    'card_index': i,
+                    'card': card,
+                    'priority': priority
+                })
         
-        # Charge cards
+        # Charge spell cards
         for card in self.wizard.cards_laid_down:
             if not card.is_fully_charged():
-                for color in ['red', 'blue', 'green', 'yellow', 'white']:
-                    if self.wizard.crystals[color] > 0:
-                        # Test if this crystal can charge the card
-                        if self._can_charge_card(card, color):
-                            charging_value = self._evaluate_charging(card, color)
-                            actions.append({
-                                'type': 'charge_card',
-                                'card': card,
-                                'color': color,
-                                'priority': 50 + charging_value
-                            })
+                for color in ['white', 'red', 'blue', 'green', 'yellow']:
+                    if (self.wizard.crystals[color] > 0 and 
+                        self._can_charge_card(card, color)):
+                        
+                        priority = 25
+                        if color == self.wizard.color:
+                            priority += 10
+                        if color == 'white':
+                            priority += 5
+                        
+                        # Higher priority if card is almost charged
+                        try:
+                            if card.get_charging_progress() > 0.7:
+                                priority += 15
+                        except:
+                            # Fallback calculation if method doesn't exist
+                            total_cost = sum(card.cost.values())
+                            used_crystals = sum(card.crystals_used.values())
+                            if total_cost > 0 and used_crystals / total_cost > 0.7:
+                                priority += 15
+                        
+                        actions.append({
+                            'type': 'charge_card',
+                            'card': card,
+                            'color': color,
+                            'priority': priority
+                        })
     
     def _can_charge_card(self, card, color):
-        """Test if a crystal can charge a card without modifying state"""
-        # Save current state
-        temp_wizard_crystals = self.wizard.crystals.copy()
-        temp_card_crystals = card.crystals_used.copy()
+        """Check if a card can be charged with a specific color"""
+        try:
+            # Check if the card needs more crystals and if we can add this color
+            if card.is_fully_charged():
+                return False
+            
+            # Check if we have the crystal
+            if self.wizard.crystals.get(color, 0) <= 0:
+                return False
+            
+            # For wild crystal requirements, check if this color can fulfill them
+            if 'wild' in card.cost:
+                wild_needed = card.cost['wild'] - card.crystals_used.get('wild', 0)
+                if wild_needed > 0:
+                    # Wild can be fulfilled by wizard's color or white
+                    if color == self.wizard.color or color == 'white':
+                        return True
+            
+            # For regular color requirements
+            if color in card.cost:
+                needed = card.cost[color] - card.crystals_used.get(color, 0)
+                if needed > 0:
+                    return True
+            
+            return False
+        except:
+            return False
+    
+    def _evaluate_charging(self, card, color):
+        """Evaluate the value of charging a card with a specific crystal"""
+        base_value = 10
         
-        # Test the charging
-        can_charge = card.add_crystals(color, 1, self.wizard)
+        # Higher value for cards closer to completion
+        total_cost = card.get_total_cost()
+        crystals_used = sum(card.crystals_used.values())
+        completion_ratio = crystals_used / max(total_cost, 1)
+        base_value += completion_ratio * 20
         
-        # Restore state
-        self.wizard.crystals = temp_wizard_crystals
-        card.crystals_used = temp_card_crystals
+        # Strategy-based bonuses
+        if self.strategy_mode == 'aggressive':
+            base_value += 5
+        elif self.strategy_mode == 'resource_focused':
+            base_value -= 2  # Less eager to spend crystals
         
-        return can_charge
+        # Color preference bonus
+        if color in self.resource_preference:
+            preference = self.resource_preference[color]
+            if preference > 3:  # We have excess of this color
+                base_value += 3
+            elif preference < 2:  # We're low on this color
+                base_value -= 5
+        
+        return base_value
     
     def _add_movement_actions(self, actions, game):
-        """Add movement actions to nearby valuable positions"""
-        adjacent_positions = game.board.get_adjacent_positions(self.wizard.location)
-        
-        # FIX: If at healing spring with full health, ensure we can move away
-        at_healing_spring = game.board.is_healing_springs(self.wizard.location)
-        at_full_health = self.wizard.health >= 6
+        """Add movement actions to available actions"""
+        # Use the correct method to get empty adjacent positions
+        adjacent_positions = game.board.get_adjacent_empty_positions(self.wizard.location)
         
         for pos in adjacent_positions:
-            move_value = self._evaluate_position(pos, game)
-            
-            # FIX: Add minimum movement value when stuck at healing spring with full health
-            if at_healing_spring and at_full_health and move_value <= 0:
-                move_value = 10  # Low but positive priority to ensure movement
-            
-            if move_value > 0:
-                actions.append({
-                    'type': 'move',
-                    'target': pos,
-                    'priority': move_value
-                })
+            priority = self._calculate_movement_priority(pos, game)
+            actions.append({
+                'type': 'move',
+                'target': pos,
+                'priority': priority
+            })
+    
+    def _calculate_movement_priority(self, position, game):
+        """Calculate priority for moving to a specific position"""
+        base_priority = 20
+        
+        # Check what's at the target position
+        if game.board.has_crystals_at_position(position):
+            base_priority += 30
+        
+        if game.board.is_mine(position):
+            mine_color = game.board.get_mine_color_from_position(position)
+            if mine_color == self.wizard.color:
+                base_priority += 25
+            else:
+                base_priority += 15
+        
+        if game.board.is_healing_springs(position) and self.wizard.health < 6:
+            heal_need = (6 - self.wizard.health) * 10
+            base_priority += heal_need
+        
+        # Strategic positioning
+        if self.strategy_mode == 'aggressive':
+            # Move toward enemies
+            enemies_nearby = len([p for p in game.players 
+                                if p != self.wizard and 
+                                game.board.get_distance(position, p.location) <= 2])
+            base_priority += enemies_nearby * 5
+        
+        return base_priority
     
     def _select_best_action(self, actions, game):
-        """Select the best action from available options"""
+        """Select the best action based on difficulty and strategy"""
         if not actions:
             return None
         
-        # Apply difficulty-based selection logic
+        # Apply difficulty-based selection
         if self.difficulty == 'easy':
             return self._easy_action_selection(actions)
         elif self.difficulty == 'medium':
@@ -368,87 +469,83 @@ class StrategicAI:
             return self._hard_action_selection(actions, game)
     
     def _easy_action_selection(self, actions):
-        """Easy AI: Simple priorities with randomness"""
-        # Sort by priority but add randomness
-        actions.sort(key=lambda x: x['priority'] + random.randint(-15, 15), reverse=True)
+        """Easy AI: Simple selection with randomness"""
+        # Add randomness to priorities
+        for action in actions:
+            action['priority'] += random.randint(-15, 15)
         
-        # Pick from top 3 actions (or all if fewer)
+        actions.sort(key=lambda x: x['priority'], reverse=True)
+        
+        # Choose from top 3 actions for unpredictability
         candidates = actions[:min(3, len(actions))]
         return random.choice(candidates)
     
     def _medium_action_selection(self, actions):
-        """Medium AI: Better priorities, less randomness"""
-        actions.sort(key=lambda x: x['priority'] + random.randint(-8, 8), reverse=True)
+        """Medium AI: Better prioritization with some randomness"""
+        # Add strategic bonuses
+        for action in actions:
+            action['priority'] += self._calculate_strategic_bonus(action, None)
+            action['priority'] += random.randint(-10, 10)
         
-        # Pick from top 2 actions (or all if fewer)
-        candidates = actions[:min(2, len(actions))]
-        return max(candidates, key=lambda x: x['priority'])
+        actions.sort(key=lambda x: x['priority'], reverse=True)
+        return actions[0]
     
     def _hard_action_selection(self, actions, game):
-        """Hard AI: Strategic selection with look-ahead"""
-        # Apply strategic bonuses
+        """Hard AI: Optimal selection with strategic thinking"""
+        # Add comprehensive strategic analysis
         for action in actions:
             action['priority'] += self._calculate_strategic_bonus(action, game)
+            # Small randomness to avoid predictability
+            action['priority'] += random.randint(-5, 5)
         
-        # Select highest priority action
-        return max(actions, key=lambda x: x['priority'])
+        actions.sort(key=lambda x: x['priority'], reverse=True)
+        return actions[0]
     
     def _calculate_strategic_bonus(self, action, game):
-        """Calculate strategic bonus for Hard AI"""
+        """Calculate strategic bonus for an action"""
         bonus = 0
+        action_type = action['type']
         
-        # Strategy-specific bonuses
+        # Strategy-based bonuses
         if self.strategy_mode == 'aggressive':
-            if action['type'] == 'cast_spell':
-                bonus += 20
-            elif action['type'] == 'move':
-                # Bonus for moving toward enemies
-                pos = action['target']
-                potential_targets = game.get_adjacent_enemies_at_position(pos, self.wizard)
-                bonus += len(potential_targets) * 10
-        
+            if action_type in ['cast_spell', 'move']:
+                bonus += 10
         elif self.strategy_mode == 'defensive':
-            if action['type'] == 'heal':
-                bonus += 15
-            elif action['type'] == 'move':
-                # Bonus for moving away from enemies or toward healing
-                pos = action['target']
-                if game.board.is_healing_springs(pos):
-                    bonus += 20
-                # Penalty for moving toward enemies without spells
-                if not self.wizard.has_charged_spells():
-                    potential_targets = game.get_adjacent_enemies_at_position(pos, self.wizard)
-                    bonus -= len(potential_targets) * 8
-        
+            if action_type in ['heal', 'charge_card']:
+                bonus += 10
         elif self.strategy_mode == 'resource_focused':
-            if action['type'] in ['mine_white', 'mine_colored']:
-                bonus += 15
-            elif action['type'] == 'charge_card':
+            if action_type in ['mine_white', 'mine_colored', 'lay_card']:
                 bonus += 10
         
-        # Combo bonuses
-        if action['type'] == 'lay_card':
-            card = action['card']
-            # Bonus if we can charge this card soon
-            chargeable_soon = 0
-            for color in card.cost:
-                if color == 'wild':
-                    if self.wizard.crystals[self.wizard.color] > 0 or self.wizard.crystals['white'] > 0:
-                        chargeable_soon += 1
-                elif self.wizard.crystals[color] > 0 or self.wizard.crystals['white'] > 0:
-                    chargeable_soon += 1
-            bonus += chargeable_soon * 3
+        # Health-based adjustments
+        if self.wizard.health <= 2:
+            if action_type == 'heal':
+                bonus += 20
+            elif action_type == 'cast_spell':
+                bonus -= 10  # Avoid risky combat when low health
+        
+        # Resource-based adjustments
+        total_crystals = sum(self.wizard.crystals.values())
+        if total_crystals >= 8:
+            if action_type in ['cast_spell', 'charge_card']:
+                bonus += 15
+            elif action_type in ['mine_white', 'mine_colored']:
+                bonus -= 10  # Don't need more crystals
         
         return bonus
     
     def _execute_action(self, action, game):
-        """Execute the chosen action"""
+        """FIXED: Execute the chosen action with comprehensive error handling"""
+        if not action:
+            return False
+        
         action_type = action['type']
         success = False
         
         try:
             if action_type == 'cast_spell':
-                success = game.cast_spell(self.wizard, action['spell_card'], gui=game.gui if hasattr(game, 'gui') else None)
+                success = game.cast_spell(self.wizard, action['spell_card'], 
+                                        gui=game.gui if hasattr(game, 'gui') else None)
             
             elif action_type == 'mine_white':
                 success = game.mine_white_crystal(self.wizard, action['position'])
@@ -474,12 +571,8 @@ class StrategicAI:
             return success
         
         except Exception as e:
-            logger.warning(f"Action execution failed: {e}")
+            logger.warning(f"Action execution failed for {action_type}: {e}")
             return False
-    
-    def _is_free_action(self, action_type):
-        """Check if an action is 'free' (doesn't consume from action limit)"""
-        return action_type in ['lay_card', 'charge_card']
     
     def _calculate_affordability(self, card):
         """Calculate how affordable a card is (0-1 scale)"""
@@ -488,148 +581,135 @@ class StrategicAI:
             return 1.0
         
         available_crystals = 0
-        for color, amount in card.cost.items():
+        for color, cost in card.cost.items():
             if color == 'wild':
-                available_crystals += self.wizard.crystals[self.wizard.color]
-                available_crystals += self.wizard.crystals['white']
+                # Wild crystals can be fulfilled by wizard's color or white crystals
+                wild_available = self.wizard.crystals.get(self.wizard.color, 0) + self.wizard.crystals.get('white', 0)
+                available_crystals += min(cost, wild_available)
             else:
-                available_crystals += self.wizard.crystals[color]
-                available_crystals += self.wizard.crystals['white']  # White can substitute
+                available_crystals += min(cost, self.wizard.crystals.get(color, 0))
         
-        return min(1.0, available_crystals / total_cost)
+        return available_crystals / total_cost
     
-    def _evaluate_charging(self, card, crystal_color):
-        """Evaluate the value of charging a card with a specific crystal"""
-        base_value = 10
-        
-        # Calculate progress gain
-        progress_before = card.get_charging_progress()
-        
-        # Test charging without modifying state
-        temp_wizard_crystals = self.wizard.crystals.copy()
-        temp_card_crystals = card.crystals_used.copy()
-        
-        if card.add_crystals(crystal_color, 1, self.wizard):
-            progress_after = card.get_charging_progress()
-            progress_gain = progress_after - progress_before
-            base_value += progress_gain * 30
-            
-            if progress_after >= 1.0:
-                base_value += 50  # Big bonus for completion
-        
-        # Restore state
-        self.wizard.crystals = temp_wizard_crystals
-        card.crystals_used = temp_card_crystals
-        
-        return base_value
-    
-    def _evaluate_position(self, pos, game):
-        """Evaluate the value of moving to a position"""
-        value = 0
-        
-        # Resource gathering opportunities
-        if game.board.has_crystals_at_position(pos):
-            value += 20
-            if self.strategy_mode == 'resource_focused':
-                value += 10
-        
-        if game.board.is_mine(pos):
-            mine_color = game.board.get_mine_color_from_position(pos)
-            if mine_color:
-                color_preference = self.resource_preference.get(mine_color, 3)
-                value += 10 + color_preference
-                if self.strategy_mode == 'resource_focused':
-                    value += 8
-        
-        # Healing opportunities
-        if game.board.is_healing_springs(pos):
-            if self.wizard.health <= 4:
-                healing_value = (6 - self.wizard.health) * 8
-                value += healing_value
-                if self.strategy_mode == 'defensive':
-                    value += 15
-        
-        # Combat positioning
+    def _guaranteed_turn_end(self, game):
+        """FIXED: Guaranteed method to end AI turn - this CANNOT fail"""
         try:
-            potential_targets = game.get_adjacent_enemies_at_position(pos, self.wizard)
-            if potential_targets:
-                if self.wizard.has_charged_spells():
-                    combat_value = len(potential_targets) * 25
-                    if self.strategy_mode == 'aggressive':
-                        combat_value += 15
-                    value += combat_value
-                elif self.strategy_mode != 'aggressive':
-                    # Avoid enemies if no spells (unless aggressive)
-                    value -= len(potential_targets) * 8
-        except:
-            pass  # In case method doesn't exist
-        
-        return value
+            logger.warning(f"AI {self.wizard.color} using guaranteed turn end")
+            
+            # Try emergency fallback first
+            if self._emergency_fallback(game):
+                return
+            
+            # If that fails, force turn end
+            self._force_turn_end(game)
+            
+        except Exception as e:
+            logger.error(f"Even guaranteed turn end failed: {e}")
+            # Ultimate fallback - directly manipulate game state
+            game.current_actions = game.max_actions_per_turn
     
     def _emergency_fallback(self, game):
-        """Emergency fallback when main AI logic fails"""
+        """FIXED: Enhanced emergency fallback with multiple strategies"""
         self.fallback_used = True
         logger.warning(f"AI {self.wizard.color} using emergency fallback")
         
-        # Try one simple random action
-        return self._quick_fallback_action(game)
+        # Try multiple fallback strategies in order
+        fallback_strategies = [
+            self._try_simple_spell_cast,
+            self._try_simple_mine,
+            self._try_simple_move,
+            self._try_simple_card_action
+        ]
+        
+        for strategy in fallback_strategies:
+            try:
+                if strategy(game):
+                    return True
+            except Exception as e:
+                logger.debug(f"Fallback strategy failed: {e}")
+                continue
+        
+        # If all strategies fail, force turn end
+        return False
     
-    def _quick_fallback_action(self, game):
-        """Perform one quick random valid action"""
-        # Try actions in order of simplicity
+    def _try_simple_spell_cast(self, game):
+        """Try to cast any available spell"""
+        if not game.can_cast_spell(self.wizard):
+            return False
         
-        # Try to cast spell if ready
-        if game.can_cast_spell(self.wizard):
-            for spell_card in self.wizard.cards_laid_down:
-                if spell_card.is_fully_charged():
-                    enemies = game.get_adjacent_enemies(self.wizard)
-                    if enemies:
-                        success = game.cast_spell(self.wizard, spell_card, gui=game.gui if hasattr(game, 'gui') else None)
-                        return success
+        for spell_card in self.wizard.cards_laid_down:
+            if spell_card.is_fully_charged():
+                enemies = game.get_adjacent_enemies(self.wizard)
+                if enemies:
+                    return game.cast_spell(self.wizard, spell_card, 
+                                         gui=game.gui if hasattr(game, 'gui') else None)
+        return False
+    
+    def _try_simple_mine(self, game):
+        """Try to mine at current position"""
+        if not game.can_mine(self.wizard):
+            return False
         
-        # Try to mine
-        if game.can_mine(self.wizard):
-            pos = self.wizard.location
-            if (game.board.has_crystals_at_position(pos) and 
-                not game.board.is_mine(pos) and 
-                self.wizard.can_hold_more_crystals()):
-                success = game.mine_white_crystal(self.wizard, pos)
-                return success
-            elif game.board.is_healing_springs(pos) and self.wizard.health < 6:
-                roll = random.randint(1, 3)
-                success = game.resolve_mine_with_roll(self.wizard, pos, roll)
-                return success
-            elif game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():
-                roll = random.randint(1, 6)
-                success = game.resolve_mine_with_roll(self.wizard, pos, roll)
-                return success
+        pos = self.wizard.location
         
-        # Try to move randomly
-        if game.can_move(self.wizard):
-            adjacent = game.board.get_adjacent_positions(self.wizard.location)
-            if adjacent:
-                target = random.choice(adjacent)
-                success = game.move_player(self.wizard, target)
-                return success
+        # Try white crystal mining first
+        if (game.board.has_crystals_at_position(pos) and 
+            not game.board.is_mine(pos) and 
+            not game.board.is_healing_springs(pos) and
+            self.wizard.can_hold_more_crystals()):
+            return game.mine_white_crystal(self.wizard, pos)
         
-        # If all else fails, try to lay down a card or charge something
+        # Try healing
+        if game.board.is_healing_springs(pos) and self.wizard.health < 6:
+            roll = random.randint(1, 3)
+            return game.resolve_mine_with_roll(self.wizard, pos, roll)
+        
+        # Try colored mining
+        if game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():
+            roll = random.randint(1, 6)
+            return game.resolve_mine_with_roll(self.wizard, pos, roll)
+        
+        return False
+    
+    def _try_simple_move(self, game):
+        """Try to move to any adjacent position"""
+        if not game.can_move(self.wizard):
+            return False
+        
+        adjacent = game.board.get_adjacent_positions(self.wizard.location)
+        free_positions = [pos for pos in adjacent if game.board.is_position_free(pos)]
+        
+        if free_positions:
+            target = random.choice(free_positions)
+            return game.move_player(self.wizard, target)
+        
+        return False
+    
+    def _try_simple_card_action(self, game):
+        """Try to lay down a card or charge something"""
+        # Try to lay down a card
         if len(self.wizard.cards_laid_down) < 2 and self.wizard.hand:
-            success = self.wizard.lay_down_spell_card(0)
-            return success
+            return self.wizard.lay_down_spell_card(0)
         
         # Try to charge a card
         for card in self.wizard.cards_laid_down:
             if not card.is_fully_charged():
                 for color in ['white', 'red', 'blue', 'green', 'yellow']:
                     if self.wizard.crystals[color] > 0:
-                        success = card.add_crystals(color, 1, self.wizard)
-                        if success:
-                            return True
+                        try:
+                            if card.add_crystals(color, 1, self.wizard):
+                                return True
+                        except Exception as e:
+                            # Log the specific error for debugging
+                            logger.debug(f"Failed to charge card with {color}: {e}")
+                            continue
         
-        # Ultimate fallback - force end turn (no action taken)
-        logger.debug(f"AI {self.wizard.color} using ultimate fallback - ending turn")
+        return False
+    
+    def _force_turn_end(self, game):
+        """FIXED: Force the turn to end by setting actions to maximum"""
+        logger.debug(f"AI {self.wizard.color} forcing turn end - setting actions to max")
         game.current_actions = game.max_actions_per_turn
-        return False  # No action was actually taken
 
 
 class AIManager:

@@ -115,12 +115,16 @@ class StartScreen:
             'background': (0, 0, 0)
         }
         
-        # Game state
-        self.setup_phase = 'player_count'
-        self.num_human_players = 2
-        self.num_ai_players = 2
+        # Game state - Updated for proper two-stage menu
+        self.setup_phase = 'player_count'  # 'player_count' -> 'player_type' -> 'player_setup' -> 'ready'
+        self.total_players = 4  # Default to 4 players
+        self.player_types = []  # List of 'human' or 'ai' for each slot
         self.player_setups = []
         self.current_setup_index = 0
+        
+        # Legacy compatibility (will be calculated from player_types)
+        self.num_human_players = 2
+        self.num_ai_players = 2
         
         # UI elements
         self.buttons = {}
@@ -156,13 +160,31 @@ class StartScreen:
         button_height = 70  # Increased from 40
         y_start = content_y + 100
         
-        for i, (human, ai) in enumerate([(1, 3), (2, 2), (3, 1), (4, 0)]):
-            self.buttons[f'config_{i}'] = {
+        # Stage 1: Total player count selection (2, 3, or 4 players)
+        for i, count in enumerate([2, 3, 4]):
+            self.buttons[f'player_count_{count}'] = {
                 'rect': pygame.Rect(center_x - button_width//2, y_start + i * 90, button_width, button_height),
-                'text': f"{human} Human, {ai} AI",
-                'human': human,
-                'ai': ai,
-                'selected': i == 1  # Default to 2H, 2AI
+                'text': f"{count} Players",
+                'count': count,
+                'selected': count == 4  # Default to 4 players
+            }
+        
+        # Stage 2: Player type selection buttons (Human/AI for each slot)
+        slot_button_width = 120
+        slot_button_height = 50
+        for i in range(4):  # Support up to 4 players
+            x_offset = (i - 1.5) * 140  # Center 4 buttons
+            self.buttons[f'slot_{i}_human'] = {
+                'rect': pygame.Rect(center_x + x_offset - slot_button_width//2, content_y + 200, slot_button_width, slot_button_height),
+                'text': 'Human',
+                'slot': i,
+                'type': 'human'
+            }
+            self.buttons[f'slot_{i}_ai'] = {
+                'rect': pygame.Rect(center_x + x_offset - slot_button_width//2, content_y + 260, slot_button_width, slot_button_height),
+                'text': 'AI',
+                'slot': i,
+                'type': 'ai'
             }
         
         # Control buttons - Bigger and better positioned
@@ -249,30 +271,65 @@ class StartScreen:
     def handle_click(self, pos):
         """Handle mouse clicks with shimmer effects"""
         if self.setup_phase == 'player_count':
-            # Check config buttons
+            # Check player count buttons
             for key, button in self.buttons.items():
-                if key.startswith('config_') and button['rect'].collidepoint(pos):
+                if key.startswith('player_count_') and button['rect'].collidepoint(pos):
                     # Add shimmer effect
                     self.shimmer_effects.add_shimmer(button['rect'])
                     
                     # Deselect all others
                     for k in self.buttons:
-                        if k.startswith('config_'):
+                        if k.startswith('player_count_'):
                             self.buttons[k]['selected'] = False
                     # Select this one
                     button['selected'] = True
-                    self.num_human_players = button['human']
-                    self.num_ai_players = button['ai']
+                    self.total_players = button['count']
                     sound_manager.play_sound('move', 0.5)
                     if self.debug_mode:
-                        print(f"DEBUG: Selected config - {button['human']} Human, {button['ai']} AI")
+                        print(f"DEBUG: Selected {button['count']} players")
             
             # Check next button
             if self.buttons['next']['rect'].collidepoint(pos):
                 self.shimmer_effects.add_shimmer(self.buttons['next']['rect'])
                 if self.debug_mode:
                     print("DEBUG: Next button clicked in player_count phase")
+                self.advance_to_player_type_selection()
+        
+        elif self.setup_phase == 'player_type':
+            # Check player type buttons (Human/AI for each slot)
+            for key, button in self.buttons.items():
+                if (key.startswith('slot_') and button['rect'].collidepoint(pos) and 
+                    button['slot'] < self.total_players):
+                    # Add shimmer effect
+                    self.shimmer_effects.add_shimmer(button['rect'])
+                    
+                    slot = button['slot']
+                    player_type = button['type']
+                    
+                    # Ensure player_types list is long enough
+                    while len(self.player_types) <= slot:
+                        self.player_types.append('human')  # Default to human
+                    
+                    self.player_types[slot] = player_type
+                    sound_manager.play_sound('move', 0.5)
+                    if self.debug_mode:
+                        print(f"DEBUG: Set player {slot + 1} to {player_type}")
+            
+            # Check next button
+            if self.buttons['next']['rect'].collidepoint(pos):
+                self.shimmer_effects.add_shimmer(self.buttons['next']['rect'])
+                if self.debug_mode:
+                    print("DEBUG: Next button clicked in player_type phase")
                 self.advance_to_player_setup()
+            
+            # Check back button
+            if self.buttons['back']['rect'].collidepoint(pos):
+                self.shimmer_effects.add_shimmer(self.buttons['back']['rect'])
+                self.setup_phase = 'player_count'
+                self.buttons['back']['enabled'] = False
+                sound_manager.play_sound('move', 0.5)
+                if self.debug_mode:
+                    print("DEBUG: Back to player count selection")
         
         elif self.setup_phase == 'player_setup':
             if self.current_setup_index >= len(self.player_setups):
@@ -337,17 +394,24 @@ class StartScreen:
                         print("DEBUG: Advanced to ready phase")
                 sound_manager.play_sound('move', 0.8)
             
-            if self.buttons['back']['rect'].collidepoint(pos) and self.current_setup_index > 0:
+            if self.buttons['back']['rect'].collidepoint(pos):
                 self.shimmer_effects.add_shimmer(self.buttons['back']['rect'])
-                # When going back, free up the current player's chosen color
-                if current_setup.color:
-                    self.buttons[f'color_{current_setup.color}']['available'] = True
-                    current_setup.color = None
-                
-                self.current_setup_index -= 1
-                sound_manager.play_sound('move', 0.5)
-                if self.debug_mode:
-                    print(f"DEBUG: Went back to player {self.current_setup_index + 1}")
+                if self.current_setup_index > 0:
+                    # When going back, free up the current player's chosen color
+                    if current_setup.color:
+                        self.buttons[f'color_{current_setup.color}']['available'] = True
+                        current_setup.color = None
+                    
+                    self.current_setup_index -= 1
+                    sound_manager.play_sound('move', 0.5)
+                    if self.debug_mode:
+                        print(f"DEBUG: Went back to player {self.current_setup_index + 1}")
+                else:
+                    # Go back to player type selection
+                    self.setup_phase = 'player_type'
+                    sound_manager.play_sound('move', 0.5)
+                    if self.debug_mode:
+                        print("DEBUG: Went back to player type selection")
         
         elif self.setup_phase == 'ready':
             if self.buttons['start']['rect'].collidepoint(pos):
@@ -371,8 +435,25 @@ class StartScreen:
         
         return None
     
+    def advance_to_player_type_selection(self):
+        """Move to player type selection phase"""
+        if self.debug_mode:
+            print(f"DEBUG: Advancing to player type selection - {self.total_players} total players")
+        
+        self.setup_phase = 'player_type'
+        self.player_types = ['human'] * self.total_players  # Default all to human
+        self.buttons['back']['enabled'] = True
+        sound_manager.play_twinkle()
+        
+        if self.debug_mode:
+            print("DEBUG: Player type selection phase initialized")
+    
     def advance_to_player_setup(self):
         """Move to player setup phase"""
+        # Calculate legacy values for compatibility
+        self.num_human_players = self.player_types.count('human')
+        self.num_ai_players = self.player_types.count('ai')
+        
         if self.debug_mode:
             print(f"DEBUG: Advancing to player setup - {self.num_human_players} human, {self.num_ai_players} AI")
         
@@ -384,16 +465,14 @@ class StartScreen:
             if key.startswith('color_'):
                 self.buttons[key]['available'] = True
         
-        # Create player setups
-        total_players = self.num_human_players + self.num_ai_players
-        
-        for i in range(total_players):
-            is_ai = i >= self.num_human_players
+        # Create player setups based on player_types
+        for i, player_type in enumerate(self.player_types):
+            is_ai = (player_type == 'ai')
             setup = PlayerSetup(i, is_ai)
             self.player_setups.append(setup)
             
             if self.debug_mode:
-                print(f"DEBUG: Created setup for {setup.username} with no color assigned yet.")
+                print(f"DEBUG: Created setup for {setup.username} ({'AI' if is_ai else 'Human'}) with no color assigned yet.")
         
         self.current_setup_index = 0
         self.buttons['back']['enabled'] = True
@@ -457,6 +536,8 @@ class StartScreen:
         # Draw phase-specific content
         if self.setup_phase == 'player_count':
             self.draw_player_count_phase()
+        elif self.setup_phase == 'player_type':
+            self.draw_player_type_phase()
         elif self.setup_phase == 'player_setup':
             self.draw_player_setup_phase()
         elif self.setup_phase == 'ready':
@@ -469,13 +550,13 @@ class StartScreen:
     
     def draw_player_count_phase(self):
         """Draw player count selection - Bigger and centered"""
-        subtitle = self.font_large.render("Choose Player Configuration", True, self.colors['white'])
+        subtitle = self.font_large.render("Choose Number of Players", True, self.colors['white'])
         subtitle_rect = subtitle.get_rect(center=(self.screen_width // 2, 220))
         self.screen.blit(subtitle, subtitle_rect)
         
-        # Draw config buttons
+        # Draw player count buttons
         for key, button in self.buttons.items():
-            if key.startswith('config_'):
+            if key.startswith('player_count_'):
                 color = self.colors['gold'] if button['selected'] else self.colors['light_grey']
                 pygame.draw.rect(self.screen, color, button['rect'], border_radius=12)
                 pygame.draw.rect(self.screen, self.colors['white'], button['rect'], 3, border_radius=12)
@@ -489,16 +570,82 @@ class StartScreen:
         
         # Draw instructions - Bigger text and better positioned
         instructions = [
-            "Select how many human players and AI opponents you want.",
-            "Each game needs 2-4 total players for the best experience.",
-            "AI opponents will provide challenging strategic gameplay!"
+            "Select the total number of players for this game.",
+            "You'll choose Human or AI for each player on the next screen.",
+            "Games work best with 2-4 players!"
         ]
         
         content_y = (self.screen_height - self.screen_height // 2) // 2
         y_offset = content_y + 400
         for instruction in instructions:
             text = self.font_small.render(instruction, True, self.colors['white'])
-            text_rect = text.get_rect(center=(self.screen_width // 2, y_offset+ 150))
+            text_rect = text.get_rect(center=(self.screen_width // 2, y_offset + 150))
+            self.screen.blit(text, text_rect)
+            y_offset += 30
+    
+    def draw_player_type_phase(self):
+        """Draw player type selection (Human/AI for each slot)"""
+        subtitle = self.font_large.render(f"Choose Player Types ({self.total_players} Players)", True, self.colors['white'])
+        subtitle_rect = subtitle.get_rect(center=(self.screen_width // 2, 220))
+        self.screen.blit(subtitle, subtitle_rect)
+        
+        center_x = self.screen_width // 2
+        content_y = (self.screen_height - self.screen_height // 2) // 2
+        
+        # Draw player slot labels and buttons
+        for i in range(self.total_players):
+            x_offset = (i - (self.total_players - 1) / 2) * 140  # Center the slots
+            
+            # Player slot label
+            slot_label = self.font_medium.render(f"Player {i + 1}", True, self.colors['white'])
+            label_rect = slot_label.get_rect(center=(center_x + x_offset, content_y + 150))
+            self.screen.blit(slot_label, label_rect)
+            
+            # Current selection indicator
+            current_type = self.player_types[i] if i < len(self.player_types) else 'human'
+            current_text = current_type.title()
+            current_color = self.colors['green'] if current_type == 'human' else self.colors['blue']
+            selection_text = self.font_small.render(current_text, True, current_color)
+            selection_rect = selection_text.get_rect(center=(center_x + x_offset, content_y + 175))
+            self.screen.blit(selection_text, selection_rect)
+            
+            # Human button
+            human_button = self.buttons[f'slot_{i}_human']
+            human_selected = (current_type == 'human')
+            human_color = self.colors['green'] if human_selected else self.colors['light_grey']
+            pygame.draw.rect(self.screen, human_color, human_button['rect'], border_radius=8)
+            pygame.draw.rect(self.screen, self.colors['white'], human_button['rect'], 3, border_radius=8)
+            
+            human_text = self.font_small.render('Human', True, self.colors['black'])
+            human_text_rect = human_text.get_rect(center=human_button['rect'].center)
+            self.screen.blit(human_text, human_text_rect)
+            
+            # AI button
+            ai_button = self.buttons[f'slot_{i}_ai']
+            ai_selected = (current_type == 'ai')
+            ai_color = self.colors['blue'] if ai_selected else self.colors['light_grey']
+            pygame.draw.rect(self.screen, ai_color, ai_button['rect'], border_radius=8)
+            pygame.draw.rect(self.screen, self.colors['white'], ai_button['rect'], 3, border_radius=8)
+            
+            ai_text = self.font_small.render('AI', True, self.colors['black'])
+            ai_text_rect = ai_text.get_rect(center=ai_button['rect'].center)
+            self.screen.blit(ai_text, ai_text_rect)
+        
+        # Draw navigation buttons
+        self.draw_button('back')
+        self.draw_button('next')
+        
+        # Draw instructions
+        instructions = [
+            "Click Human or AI for each player slot.",
+            "You can have any combination - even all AI for testing!",
+            "Human players will use mouse/keyboard, AI players are computer-controlled."
+        ]
+        
+        y_offset = content_y + 350
+        for instruction in instructions:
+            text = self.font_small.render(instruction, True, self.colors['white'])
+            text_rect = text.get_rect(center=(self.screen_width // 2, y_offset))
             self.screen.blit(text, text_rect)
             y_offset += 30
     

@@ -120,9 +120,7 @@ class HighlightManager:
                 pygame.draw.circle(highlight_surface, (255, 255, 0, 100), (radius, radius), radius)
                 
             # Blit the highlight surface to the screen
-            screen.blit(highlight_surface, (x - radius, y - radius))
-
-        
+            screen.blit(highlight_surface, (x - radius, y - radius))      
 
 class SoundManager:
     """Simple sound manager for game audio feedback"""

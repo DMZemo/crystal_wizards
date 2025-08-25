@@ -392,8 +392,6 @@ class BlockingDialog:
         instruction_x = self.dialog_x + (self.dialog_w - instruction_surface.get_width()) // 2
         self.screen.blit(instruction_surface, (instruction_x, self.dialog_y + self.dialog_h - 20))
 
-
-
 class GameGUI:
     def __init__(self, game):
         """Initialize the game GUI to fill the entire screen in a closable window."""
@@ -412,9 +410,9 @@ class GameGUI:
         pygame.display.set_caption("Crystal Wizards")
 
         pygame.font.init()
-        self.font_small = pygame.font.Font(None, 30)
-        self.font_medium = pygame.font.Font(None, 40)
-        self.font_large = pygame.font.Font(None, 60)
+        self.font_small = pygame.font.Font(None, 25)
+        self.font_medium = pygame.font.Font(None, 30)
+        self.font_large = pygame.font.Font(None, 50)
 
         # Board layout
         self.board_center_x = self.screen_width // 2 - 200
@@ -1633,7 +1631,6 @@ class GameGUI:
             winner_rect = winner_text.get_rect(center=(self.screen_width // 2, self.screen_height // 2))
             self.screen.blit(winner_text, winner_rect)
 
-
 def main():
     """Simple test to run the GUI with a sample game"""
     pygame.init()
@@ -1647,7 +1644,6 @@ def main():
         traceback.print_exc()
     finally:
         pygame.quit()
-
 
 if __name__ == "__main__":
     main()
