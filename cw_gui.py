@@ -7,6 +7,7 @@ names otherwise. It also adds a quit confirmation dialog on Esc or window close.
 """
 
 import math
+import os
 import sys
 import pygame
 from cw_entities import AIWizard
@@ -452,7 +453,7 @@ class GameGUI:
         self.font_large = pygame.font.Font(None, 50)
 
         # Board layout
-        self.board_center_x = self.screen_width // 2 - 200
+        self.board_center_x = self.screen_width // 2
         self.board_center_y = self.screen_height // 2
         self.center_radius = 30
         self.rect_distance = 80
@@ -499,6 +500,42 @@ class GameGUI:
 
         # Quit dialog
         self.quit_dialog = QuitConfirmDialog(self.screen, self.font_large)
+        
+        # Load and scale background image
+        self._load_background_image()
+
+    def _load_background_image(self):
+        """Load and scale the background image to fit the screen"""
+        try:
+            # Load the background image
+            bg_path = os.path.join("crystal_wizards_background.png")
+            self.bg_original = pygame.image.load(bg_path).convert()
+            # Scale to current screen size
+            self.bg_scaled = pygame.transform.scale(self.bg_original, (self.screen_width, self.screen_height))
+        except (pygame.error, FileNotFoundError) as e:
+            print(f"Warning: Could not load background image: {e}")
+            # Create a fallback gradient background
+            self.bg_original = None
+            self.bg_scaled = self._create_fallback_background()
+    
+    def _create_fallback_background(self):
+        """Create a fallback gradient background if image loading fails"""
+        surface = pygame.Surface((self.screen_width, self.screen_height))
+        # Create a simple gradient from dark blue to light blue
+        for y in range(self.screen_height):
+            ratio = y / self.screen_height
+            color_r = int(20 + (100 - 20) * ratio)
+            color_g = int(30 + (150 - 30) * ratio)
+            color_b = int(80 + (200 - 80) * ratio)
+            pygame.draw.line(surface, (color_r, color_g, color_b), (0, y), (self.screen_width, y))
+        return surface
+    
+    def _rescale_background(self):
+        """Rescale the background image when window is resized"""
+        if self.bg_original:
+            self.bg_scaled = pygame.transform.scale(self.bg_original, (self.screen_width, self.screen_height))
+        else:
+            self.bg_scaled = self._create_fallback_background()
 
     # ---- Utility for name display ----
     def display_name(self, player):
@@ -761,10 +798,12 @@ class GameGUI:
         """Handle window resize events for dynamic scaling"""
         self.screen_width, self.screen_height = event.w, event.h
         self.screen = pygame.display.set_mode((self.screen_width, self.screen_height), pygame.RESIZABLE)
-        self.board_center_x = self.screen_width // 2 - 200
+        self.board_center_x = self.screen_width // 2
         self.board_center_y = self.screen_height // 2
         self.calculate_position_coordinates()
         self.action_panel = ActionPanel(self.screen_width - 350, 280, self.font_medium)
+        # Rescale background image for new window size
+        self._rescale_background()
 
     def handle_mouse_click(self, pos):
         """Handle mouse clicks on the game board and UI"""
@@ -994,7 +1033,15 @@ class GameGUI:
     # ---- Drawing ----
     def draw(self):
         """Draw the entire game state"""
-        self.screen.fill(COLORS['light_grey'])
+        # Draw background image first
+        if hasattr(self, 'bg_scaled') and self.bg_scaled:
+            self.screen.blit(self.bg_scaled, (0, 0))
+        else:
+            # Fallback to solid color if background not loaded
+            self.screen.fill(COLORS['light_grey'])
+
+        # Draw semi-transparent grey overlay behind the board for better visibility
+        self.draw_board_overlay()
 
         self.update_blocking_highlights()
         self.update_attack_animations()
@@ -1024,6 +1071,24 @@ class GameGUI:
                     wizard.is_blocking_highlighted = False
                     wizard.blocking_highlight_timer = 0
 
+    def draw_board_overlay(self):
+        """Draw a semi-transparent grey overlay behind the board for better visibility"""
+        # Calculate overlay dimensions based on board layout
+        # The mines are the furthest elements at mine_distance from center
+        padding = 60  # Extra padding around the board
+        overlay_size = (self.mine_distance + padding) * 2
+        
+        # Calculate overlay position (centered on board)
+        overlay_x = self.board_center_x - overlay_size // 2
+        overlay_y = self.board_center_y - overlay_size // 2
+        
+        # Create semi-transparent surface
+        overlay = pygame.Surface((overlay_size, overlay_size), pygame.SRCALPHA)
+        overlay.fill((128, 128, 128, 120))  # Grey with 120/255 alpha (semi-transparent)
+        
+        # Draw the overlay
+        self.screen.blit(overlay, (overlay_x, overlay_y))
+
     def draw_board(self):
         """Draw the game board with new clean layout"""
         self.draw_connections()
@@ -1050,16 +1115,16 @@ class GameGUI:
                         if connection_id not in drawn_connections:
                             drawn_connections.add(connection_id)
                             end_pos = self.position_coords[adjacent]
-                            pygame.draw.line(self.screen, COLORS['white'], start_pos, end_pos, 2)
+                            pygame.draw.line(self.screen, COLORS['white'], start_pos, end_pos, 4)
 
     def draw_position(self, position, coords):
         """Draw a single board position with correct shape and color"""
         x, y = coords
 
         if position == 'center':
-            pygame.draw.circle(self.screen, COLORS['white'], (x, y), 25)
-            pygame.draw.circle(self.screen, COLORS['black'], (x, y), 25, 2)
-            pygame.draw.circle(self.screen, COLORS['light_blue'], (x, y), 15)
+            pygame.draw.circle(self.screen, COLORS['white'], (x, y), 35)
+            pygame.draw.circle(self.screen, COLORS['black'], (x, y), 35, 2)
+            pygame.draw.circle(self.screen, COLORS['light_blue'], (x, y), 20)
             text = self.font_small.render("H", True, COLORS['blue'])
             text_rect = text.get_rect(center=(x, y))
             self.screen.blit(text, text_rect)
@@ -1072,11 +1137,11 @@ class GameGUI:
                 'rect_west': COLORS['blue']
             }
             color = color_map.get(position, COLORS['grey'])
-            pygame.draw.rect(self.screen, color, (x - 20, y - 15, 40, 30))
-            pygame.draw.rect(self.screen, COLORS['black'], (x - 20, y - 15, 40, 30), 2)
+            pygame.draw.rect(self.screen, color, (x - 30, y - 22, 60, 45))
+            pygame.draw.rect(self.screen, COLORS['black'], (x - 30, y - 22, 60, 45), 2)
 
         elif position.startswith('hex_'):
-            self.draw_hexagon(x, y, 20, COLORS['grey'], COLORS['black'])
+            self.draw_hexagon(x, y, 30, COLORS['grey'], COLORS['black'])
             # Determine crystal count from canonical storage
             crystal_count = 0
             pos_data = self.game.board.positions.get(position)
@@ -1118,8 +1183,15 @@ class GameGUI:
                 text_rect = text.get_rect(center=(x, y))
                 self.screen.blit(text, text_rect)
 
-            direction = position.split('_')[1].title()
-            mine_label = f"{direction} Mine"
+            # Map position to color name
+            position_to_color = {
+                'mine_north': 'Yellow',
+                'mine_south': 'Green', 
+                'mine_east': 'Blue',
+                'mine_west': 'Red'
+            }
+            color_name = position_to_color.get(position, 'Unknown')
+            mine_label = f"{color_name} Mine"
             label_text = self.font_small.render(mine_label, True, COLORS['black'])
             label_rect = label_text.get_rect(center=(x, y - 45))
             self.screen.blit(label_text, label_rect)

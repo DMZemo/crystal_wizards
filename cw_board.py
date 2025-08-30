@@ -116,7 +116,9 @@ class NewBoardLayout:
             for hex_idx in hex_indices:
                 self.connections[f'hex_{hex_idx}'].append(mine_id)
 
-    def calculate_screen_coordinates(self, center_x=400, center_y=400):
+    def calculate_screen_coordinates(self, screen_width=800, screen_height=800):
+        center_x = screen_width // 2
+        center_y = screen_height // 2
         self.position_coordinates['center'] = (center_x, center_y)
 
         rect_distance = 80

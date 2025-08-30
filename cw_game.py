@@ -1,5 +1,6 @@
 """
 Crystal Wizards - Core Game Logic
+
 FIXED VERSION - Improved crystal return logic, AI integration, and stability
 """
 
