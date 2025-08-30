@@ -321,3 +321,31 @@ class GameBoard:
         """Get positions where spells can be cast from the given position"""
         # For now, return adjacent positions - this may need refinement based on spell rules
         return self.get_adjacent_positions(position)
+    
+    def get_distance(self, pos1, pos2):
+        """Calculate the shortest path distance between two positions using BFS"""
+        if pos1 == pos2:
+            return 0
+        
+        if pos1 not in self.positions or pos2 not in self.positions:
+            return float('inf')  # Invalid positions
+        
+        # Use BFS to find shortest path
+        from collections import deque
+        
+        queue = deque([(pos1, 0)])
+        visited = {pos1}
+        
+        while queue:
+            current_pos, distance = queue.popleft()
+            
+            # Check all adjacent positions
+            for adjacent_pos in self.get_adjacent_positions(current_pos):
+                if adjacent_pos == pos2:
+                    return distance + 1
+                
+                if adjacent_pos not in visited:
+                    visited.add(adjacent_pos)
+                    queue.append((adjacent_pos, distance + 1))
+        
+        return float('inf')  # No path found

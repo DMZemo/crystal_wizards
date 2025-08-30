@@ -174,7 +174,7 @@ class BlockingDialog:
     def _confirm_blocking(self):
         """Confirm the current blocking selection and spend crystals"""
         if self.total_selected > 0:
-            # Spend the selected crystals
+            # Spend the selected crystals using the new blocking logic
             crystals_spent = {}
             total_blocked = 0
             for color, amount in self.crystals_to_spend.items():
@@ -186,8 +186,45 @@ class BlockingDialog:
                         crystals_spent[color] = actual_spent
                         total_blocked += actual_spent
             
-            # Return crystals to board if game reference available
-            if self.game and crystals_spent:
+            # Handle crystal distribution using new blocking rules
+            if self.game and crystals_spent and self.caster:
+                attacker_color = getattr(self.caster, 'color', None)
+                crystals_to_attacker = {}
+                crystals_to_board = {}
+                
+                for color, amount in crystals_spent.items():
+                    if amount > 0:
+                        # If blocking crystals match attacker's color, try to give them to attacker
+                        if color == attacker_color:
+                            # Calculate how many crystals can fit in attacker's reserve (max 6 total)
+                            attacker_total = sum(self.caster.crystals.values())
+                            space_available = max(0, 6 - attacker_total)
+                            crystals_to_give = min(amount, space_available)
+                            
+                            if crystals_to_give > 0:
+                                crystals_to_attacker[color] = crystals_to_give
+                                # Add crystals to attacker's reserve
+                                self.caster.crystals[color] = self.caster.crystals.get(color, 0) + crystals_to_give
+                            
+                            # Any excess goes to board
+                            excess = amount - crystals_to_give
+                            if excess > 0:
+                                crystals_to_board[color] = excess
+                        else:
+                            # Non-matching crystals go to board normally
+                            crystals_to_board[color] = amount
+                
+                # Return non-matching crystals to board
+                if crystals_to_board:
+                    self.game.return_crystals_to_board(crystals_to_board, self.wizard.location)
+                    
+                # Log crystal transfers to attacker
+                if crystals_to_attacker:
+                    total_transferred = sum(crystals_to_attacker.values())
+                    self.game.action_log.append(f"{total_transferred} {attacker_color} crystal(s) transferred to {self.caster.color.title()} Wizard's reserve!")
+            
+            elif self.game and crystals_spent:
+                # Fallback to old behavior if no caster specified
                 crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
                 if crystals_to_return:
                     self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
@@ -976,8 +1013,16 @@ class GameGUI:
             self.draw_game_over()
 
     def update_blocking_highlights(self):
-        """Update any animated highlights (placeholder)."""
-        pass
+        """Update blocking highlights and remove expired ones."""
+        current_time = pygame.time.get_ticks()
+        
+        # Check all wizards for expired blocking highlights
+        for wizard in self.game.players:
+            if getattr(wizard, 'is_blocking_highlighted', False):
+                highlight_start = getattr(wizard, 'blocking_highlight_timer', 0)
+                if current_time - highlight_start > 1000:  # 1 second
+                    wizard.is_blocking_highlighted = False
+                    wizard.blocking_highlight_timer = 0
 
     def draw_board(self):
         """Draw the game board with new clean layout"""

@@ -64,18 +64,8 @@ class Wizard:
         """Check if wizard has any crystals available for blocking"""
         return self.get_total_crystals_for_blocking() > 0
 
-    def spend_crystals_for_blocking(self, amount, game=None):
-        """
-        Spend crystals for blocking damage. Returns actual amount spent.
-        Spends crystals in priority order: colored crystals first, then white crystals.
-        """
-        if amount <= 0:
-            return 0
-        
-        crystals_to_spend = min(amount, self.get_total_crystals_for_blocking())
-        remaining_to_spend = crystals_to_spend
-        crystals_spent = {'red': 0, 'blue': 0, 'green': 0, 'yellow': 0, 'white': 0}
-        
+    def _spend_crystals_normal_priority(self, crystals_spent, remaining_to_spend):
+        """Helper method to spend crystals in normal priority order"""
         # First spend colored crystals (non-white)
         for color in ['red', 'blue', 'green', 'yellow']:
             if remaining_to_spend <= 0:
@@ -96,12 +86,104 @@ class Wizard:
                 crystals_spent['white'] = to_spend
                 remaining_to_spend -= to_spend
         
-        # Return spent crystals to the board if game reference is available
-        if game and crystals_spent:
-            # Only return crystals that were actually spent (non-zero amounts)
+        return remaining_to_spend
+
+    def spend_crystals_for_blocking(self, amount, game=None, attacker=None):
+        """
+        Spend crystals for blocking damage. Returns actual amount spent.
+        Spends crystals in priority order: colored crystals first, then white crystals.
+        New logic: crystals matching attacker's color go to attacker's reserve instead of board.
+        AI logic: medium/hard AI avoid spending crystals that match attacker's color when possible.
+        """
+        if amount <= 0:
+            return 0
+        
+        crystals_to_spend = min(amount, self.get_total_crystals_for_blocking())
+        remaining_to_spend = crystals_to_spend
+        crystals_spent = {'red': 0, 'blue': 0, 'green': 0, 'yellow': 0, 'white': 0}
+        
+        # For AI players (medium/hard), try to avoid spending attacker's color crystals
+        if isinstance(self, AIWizard) and hasattr(self, 'difficulty') and self.difficulty in ['medium', 'hard']:
+            attacker_color = getattr(attacker, 'color', None) if attacker else None
+            if attacker_color and attacker_color in ['red', 'blue', 'green', 'yellow']:
+                # First spend non-matching colored crystals
+                for color in ['red', 'blue', 'green', 'yellow']:
+                    if remaining_to_spend <= 0:
+                        break
+                    if color != attacker_color:  # Skip attacker's color for now
+                        available = self.crystals[color]
+                        to_spend = min(remaining_to_spend, available)
+                        if to_spend > 0:
+                            self.crystals[color] -= to_spend
+                            crystals_spent[color] = to_spend
+                            remaining_to_spend -= to_spend
+                
+                # Then spend white crystals
+                if remaining_to_spend > 0:
+                    available = self.crystals['white']
+                    to_spend = min(remaining_to_spend, available)
+                    if to_spend > 0:
+                        self.crystals['white'] -= to_spend
+                        crystals_spent['white'] = to_spend
+                        remaining_to_spend -= to_spend
+                
+                # Finally, if still need more crystals, use attacker's color as last resort
+                if remaining_to_spend > 0:
+                    available = self.crystals[attacker_color]
+                    to_spend = min(remaining_to_spend, available)
+                    if to_spend > 0:
+                        self.crystals[attacker_color] -= to_spend
+                        crystals_spent[attacker_color] = to_spend
+                        remaining_to_spend -= to_spend
+            else:
+                # No attacker color to avoid, use normal priority
+                remaining_to_spend = self._spend_crystals_normal_priority(crystals_spent, remaining_to_spend)
+        else:
+            # Easy AI or human players use normal priority
+            remaining_to_spend = self._spend_crystals_normal_priority(crystals_spent, remaining_to_spend)
+        
+        # Handle crystal distribution based on new blocking rules
+        if game and crystals_spent and attacker:
+            attacker_color = getattr(attacker, 'color', None)
+            crystals_to_attacker = {}
+            crystals_to_board = {}
+            
+            for color, amount in crystals_spent.items():
+                if amount > 0:
+                    # If blocking crystals match attacker's color, try to give them to attacker
+                    if color == attacker_color:
+                        # Calculate how many crystals can fit in attacker's reserve (max 6 total)
+                        attacker_total = sum(attacker.crystals.values())
+                        space_available = max(0, 6 - attacker_total)
+                        crystals_to_give = min(amount, space_available)
+                        
+                        if crystals_to_give > 0:
+                            crystals_to_attacker[color] = crystals_to_give
+                            # Add crystals to attacker's reserve
+                            attacker.crystals[color] = attacker.crystals.get(color, 0) + crystals_to_give
+                        
+                        # Any excess goes to board
+                        excess = amount - crystals_to_give
+                        if excess > 0:
+                            crystals_to_board[color] = excess
+                    else:
+                        # Non-matching crystals go to board normally
+                        crystals_to_board[color] = amount
+            
+            # Return non-matching crystals to board
+            if crystals_to_board:
+                game.return_crystals_to_board(crystals_to_board, self.location)
+                
+            # Log crystal transfers to attacker
+            if crystals_to_attacker:
+                total_transferred = sum(crystals_to_attacker.values())
+                game.action_log.append(f"{total_transferred} {attacker_color} crystal(s) transferred to {attacker.color.title()} Wizard's reserve!")
+        
+        elif game and crystals_spent:
+            # Fallback to old behavior if no attacker specified
             crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
             if crystals_to_return:
-                game.return_crystals_to_board(crystals_to_return)
+                game.return_crystals_to_board(crystals_to_return, self.location)
         
         return crystals_to_spend, crystals_spent
     
@@ -119,9 +201,9 @@ class Wizard:
             
             if isinstance(self, AIWizard):
                 # AI blocking strategy based on difficulty
-                crystals_to_use = self._calculate_ai_blocking_amount(damage, game)
+                crystals_to_use = self._calculate_ai_blocking_amount(damage, game, caster)
                 if crystals_to_use > 0:
-                    blocked_amount, crystals_spent = self.spend_crystals_for_blocking(crystals_to_use, game)
+                    blocked_amount, crystals_spent = self.spend_crystals_for_blocking(crystals_to_use, game, caster)
                     actual_damage = max(0, damage - blocked_amount)
                     
                     # Play blocking sound and trigger highlight
@@ -141,7 +223,7 @@ class Wizard:
         # Apply the final damage
         self.health = max(0, self.health - actual_damage)
 
-    def _calculate_ai_blocking_amount(self, damage, game):
+    def _calculate_ai_blocking_amount(self, damage, game, attacker=None):
         """Calculate how many crystals AI should use for blocking based on difficulty"""
         if not hasattr(self, 'difficulty'):
             # Default to maximum blocking if no difficulty set
@@ -151,13 +233,15 @@ class Wizard:
         max_blockable = min(damage, available_crystals)
         
         if self.difficulty == 'easy':
-            # Easy AI: Random blocking amount (0 to max)
+            # Easy AI: Random blocking amount (0 to max), uses any crystals
             import random
             return random.randint(0, max_blockable)
         
         elif self.difficulty in ['medium', 'hard']:
             # Medium/Hard AI: Strategic blocking
-            # Prioritize keeping crystals needed for spells and white crystals
+            # NEW: Avoid using crystals that match attacker's color when possible
+            
+            attacker_color = getattr(attacker, 'color', None) if attacker else None
             
             # Calculate crystals needed for spells in hand and laid down
             crystals_needed_for_spells = 0
@@ -173,6 +257,28 @@ class Wizard:
             # Calculate how many crystals we can afford to spend
             crystals_to_reserve = crystals_needed_for_spells + white_crystals_to_keep
             crystals_available_for_blocking = max(0, available_crystals - crystals_to_reserve)
+            
+            # NEW: If we have an attacker color, try to avoid using those crystals
+            if attacker_color and attacker_color in ['red', 'blue', 'green', 'yellow']:
+                # Calculate available crystals excluding attacker's color
+                non_matching_crystals = 0
+                for color in ['red', 'blue', 'green', 'yellow', 'white']:
+                    if color != attacker_color:
+                        available_of_color = self.crystals.get(color, 0)
+                        # Don't count reserved crystals
+                        if color == 'white':
+                            available_of_color = max(0, available_of_color - white_crystals_to_keep)
+                        non_matching_crystals += available_of_color
+                
+                # Try to block using only non-matching crystals if possible
+                preferred_blocking_amount = min(damage, non_matching_crystals)
+                
+                # If we can block enough damage without using attacker's color, do so
+                if preferred_blocking_amount >= damage * 0.8:  # Block at least 80% of damage
+                    return preferred_blocking_amount
+                
+                # Otherwise, use strategic blocking but prefer non-matching crystals
+                return min(damage, crystals_available_for_blocking, max_blockable)
             
             # Block as much as possible without compromising spell casting
             return min(damage, crystals_available_for_blocking, max_blockable)
