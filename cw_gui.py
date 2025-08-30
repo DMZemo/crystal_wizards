@@ -238,7 +238,7 @@ class BlockingDialog:
         """Handle mouse clicks in the blocking dialog"""
         # Crystal selection buttons (+ and - for each color)
         colors = ['red', 'blue', 'green', 'yellow', 'white']
-        crystal_section_y = self.dialog_y + 180
+        crystal_section_y = self.dialog_y + 150
         
         for i, color in enumerate(colors):
             if self.wizard.crystals.get(color, 0) == 0:
