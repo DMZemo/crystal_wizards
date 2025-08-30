@@ -4,10 +4,6 @@ A strategic board game where wizards collect crystals and cast spells to elimina
 The Object of the Game is to collect crystals, charge spells, cast spells, and eliminate all opponents.
 This file initializes the game, handles the main loop, and manages the game GUI.
 
-NEED TO FIX RETURNING WHITE CRYSTALS SPENT TO BOARD
-And RETURNING CRYSTALS TO BOARD WHEN PLAYER DIES
-
-
 """
 
 import pygame

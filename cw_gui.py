@@ -15,6 +15,8 @@ from cw_game import CrystalWizardsGame
 from ui import Button, HighlightManager, ActionPanel
 from sound_manager import sound_manager
 from dice_animation import DiceRollManager
+from blood_magic_choice_dialog import BloodMagicChoiceDialog
+from blood_magic_dialog import BloodMagicDialog
 
 # Colors
 COLORS = {
@@ -498,11 +500,20 @@ class GameGUI:
         self.selected_card_index = None
         self.mouse_pos = (0, 0)
 
+    
+        # Blood Magic dialogs
+        self.blood_magic_choice_dialog = BloodMagicChoiceDialog(self.screen, self.font_medium, self.font_large)
+        self.blood_magic_dialog = BloodMagicDialog(self.screen, self.font_medium, self.font_large)
+        
         # Quit dialog
         self.quit_dialog = QuitConfirmDialog(self.screen, self.font_large)
         
         # Load and scale background image
         self._load_background_image()
+
+    def _is_blood_magic_choice_active(self):
+        """Check if the Blood Magic choice dialog is currently active."""
+        return hasattr(self, 'blood_magic_dialog') and self.blood_magic_dialog.visible
 
     def _load_background_image(self):
         """Load and scale the background image to fit the screen"""
@@ -517,7 +528,7 @@ class GameGUI:
             # Create a fallback gradient background
             self.bg_original = None
             self.bg_scaled = self._create_fallback_background()
-    
+        
     def _create_fallback_background(self):
         """Create a fallback gradient background if image loading fails"""
         surface = pygame.Surface((self.screen_width, self.screen_height))
@@ -726,14 +737,36 @@ class GameGUI:
                             running = False
                             break
                     elif event.type == pygame.MOUSEBUTTONDOWN:
+                        # Check if Blood Magic dialogs should handle the event first
+                        if hasattr(self, 'blood_magic_choice_dialog') and self.blood_magic_choice_dialog.handle_event(event):
+                            continue
+                        if hasattr(self, 'blood_magic_dialog') and self.blood_magic_dialog.handle_event(event):
+                            continue
                         self.handle_mouse_click(event.pos)
+                    elif event.type == pygame.MOUSEBUTTONUP:
+                        # Handle mouse button up for Blood Magic dialogs (needed for Button class)
+                        if hasattr(self, 'blood_magic_choice_dialog') and self.blood_magic_choice_dialog.handle_event(event):
+                            continue
+                        if hasattr(self, 'blood_magic_dialog') and self.blood_magic_dialog.handle_event(event):
+                            continue
                     elif event.type == pygame.KEYDOWN:
+                        # Check if Blood Magic dialogs should handle the event first
+                        if hasattr(self, 'blood_magic_choice_dialog') and self.blood_magic_choice_dialog.handle_event(event):
+                            continue
+                        if hasattr(self, 'blood_magic_dialog') and self.blood_magic_dialog.handle_event(event):
+                            continue
                         if event.key == pygame.K_ESCAPE:
                             if self.quit_dialog.run_modal():
                                 running = False
                                 break
                         else:
                             self.handle_key_press(event.key)
+                    elif event.type == pygame.MOUSEMOTION:
+                        # Handle mouse motion for Blood Magic dialogs
+                        if hasattr(self, 'blood_magic_choice_dialog') and self.blood_magic_choice_dialog.handle_event(event):
+                            continue
+                        if hasattr(self, 'blood_magic_dialog') and self.blood_magic_dialog.handle_event(event):
+                            continue
                     elif event.type == pygame.VIDEORESIZE:
                         self.handle_resize(event)
 
@@ -924,6 +957,16 @@ class GameGUI:
                 self.highlight_manager.clear_highlights()
             return
 
+        # Check for Blood Magic opportunity (matching color mine for human players)
+        if (self.game.board.is_mine(position) and 
+            not isinstance(player, AIWizard)):
+            
+            mine_color = self.game.board.get_mine_color_from_position(position)
+            if mine_color and mine_color == player.color:
+                # Show Blood Magic choice dialog
+                self.show_blood_magic_choice(player, position)
+                return
+
         self.is_dice_rolling = True
         self.pending_action = {'player': player, 'position': position}
 
@@ -966,6 +1009,73 @@ class GameGUI:
     def show_reserve_full_warning(self):
         """Show visual feedback for reserve full (placeholder)."""
         pass
+
+    def show_blood_magic_choice(self, player, position):
+        """Show the Blood Magic choice dialog and handle the result."""
+        def on_choice_made(choice):
+            if choice == 'blood_magic':
+                self.initiate_blood_magic_sequence(player, position)
+            else:
+                # Regular mining
+                self.initiate_regular_mine_sequence(player, position)
+        
+        # Initialize dialogs if not already done
+        if not hasattr(self, 'blood_magic_choice_dialog'):
+            self.blood_magic_choice_dialog = BloodMagicChoiceDialog(self.screen, self.font_medium, self.font_large)
+        if not hasattr(self, 'blood_magic_dialog'):
+            self.blood_magic_dialog = BloodMagicDialog(self.screen, self.font_medium, self.font_large)
+        
+        self.blood_magic_choice_dialog.show(on_choice_made)
+
+    def initiate_blood_magic_sequence(self, player, position):
+        """Handle Blood Magic mining with two dice."""
+        import random
+        
+        # Roll two dice
+        dice1 = random.randint(1, 6)
+        dice2 = random.randint(1, 6)
+        
+        def on_dice_assignment(mining_die, health_die):
+            # Apply health - set to die result (Blood Magic risk/reward mechanic)
+            old_health = player.health
+            player.health = health_die  # Set health to die result, not add to it
+            health_change = health_die - old_health
+            
+            # Create appropriate log message based on health change
+            if health_change > 0:
+                self.game.action_log.append(f"{player.color.title()} Wizard's health set to {health_die} (↑{health_change}) from Blood Magic!")
+            elif health_change < 0:
+                self.game.action_log.append(f"{player.color.title()} Wizard's health set to {health_die} (↓{abs(health_change)}) from Blood Magic!")
+            else:
+                self.game.action_log.append(f"{player.color.title()} Wizard's health remains {health_die} from Blood Magic!")
+            
+            # Then resolve mining with the chosen die
+            success = self.game.resolve_mine_with_roll(player, position, mining_die)
+            
+            if success == "reserve_full":
+                self.show_reserve_full_warning()
+            elif success:
+                self.sound_manager.play_mine()
+                self.game.action_log.append(f"{player.color.title()} Wizard used Blood Magic! Health: +{health_die}, Mining: {mining_die}")
+            
+            self.current_action_mode = None
+            self.highlight_manager.clear_highlights()
+        
+        # Show the Blood Magic dialog for dice assignment
+        self.blood_magic_dialog.show(dice1, dice2, player.color, on_dice_assignment)
+
+    def initiate_regular_mine_sequence(self, player, position):
+        """Handle regular mining (single die)."""
+        self.is_dice_rolling = True
+        self.pending_action = {'player': player, 'position': position}
+        
+        if self.game.board.is_healing_springs(position):
+            self.dice_manager.roll_healing_dice(self.resolve_mine_sequence)
+        elif self.game.board.is_mine(position):
+            self.dice_manager.roll_mine_dice(self.resolve_mine_sequence)
+        else:
+            self.is_dice_rolling = False
+            self.pending_action = None
 
     def handle_ui_click(self, pos, current_player):
         """Handle clicks on UI elements"""
@@ -1055,6 +1165,12 @@ class GameGUI:
         current_player = self.game.get_current_player()
         if isinstance(current_player, AIWizard) and not self.game.game_over:
             self.action_panel.draw_ai_buttons(self.screen)
+
+        # Draw Blood Magic dialogs
+        if hasattr(self, 'blood_magic_choice_dialog'):
+            self.blood_magic_choice_dialog.draw()
+        if hasattr(self, 'blood_magic_dialog'):
+            self.blood_magic_dialog.draw()
 
         if self.game.game_over:
             self.draw_game_over()

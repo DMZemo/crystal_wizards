@@ -20,7 +20,9 @@ class DiceAnimator:
         self.is_animating = False
         self.animation_start_time = 0
         self.final_result = 0
-        self.dice_type = 'normal'  # 'normal' or 'healing'
+        self.final_results = [0, 0]  # For dual dice
+        self.dice_type = 'normal'  # 'normal', 'healing', or 'blood_magic'
+        self.num_dice = 1  # Number of dice to animate
         
         # Animation parameters
         self.roll_duration = 2.0  # seconds
@@ -39,18 +41,25 @@ class DiceAnimator:
             'shadow': (100, 100, 100)
         }
     
-    def start_roll_animation(self, dice_type='normal', callback=None):
+    def start_roll_animation(self, dice_type='normal', callback=None, num_dice=1):
         """Start animated dice roll"""
         self.dice_type = dice_type
+        self.num_dice = num_dice
         self.is_animating = True
         self.animation_start_time = time.time()
         self.callback = callback
         
-        # Determine final result
+        # Determine final results
         if dice_type == 'healing':
             self.final_result = random.choice([1, 1, 1, 2, 2, 3])  # Healing springs die
+            self.final_results = [self.final_result, 0]
+        elif dice_type == 'blood_magic':
+            # Two independent dice for blood magic
+            self.final_results = [random.randint(1, 6), random.randint(1, 6)]
+            self.final_result = self.final_results[0]  # For compatibility
         else:
             self.final_result = random.randint(1, 6)  # Normal d6
+            self.final_results = [self.final_result, 0]
         
         # Play rolling sound
         sound_manager.play_dice_roll()
@@ -73,7 +82,10 @@ class DiceAnimator:
             # Animation complete
             self.is_animating = False
             if self.callback:
-                self.callback(self.final_result)
+                if self.dice_type == 'blood_magic':
+                    self.callback(self.final_results[0], self.final_results[1])
+                else:
+                    self.callback(self.final_result)
             return False
         
         return True
@@ -85,33 +97,65 @@ class DiceAnimator:
         bounce_offset = math.sin(bounce_progress) * self.bounce_height * (1 - elapsed / self.roll_duration)
         
         # Calculate spin
-        spin_angle = elapsed * self.spin_speed * 360
+        spin_angle = elapsed * self.spin_speed * 180
         
-        # Draw multiple dice for effect
-        dice_size = 60
-        for i in range(3):
-            offset_x = (i - 1) * 20
-            offset_y = bounce_offset + (i * 5)
-            
-            dice_x = center_x + offset_x
-            dice_y = center_y + offset_y
-            
-            # Draw dice shadow
-            shadow_rect = pygame.Rect(dice_x - dice_size//2 + 3, dice_y - dice_size//2 + 3, dice_size, dice_size)
-            pygame.draw.rect(self.screen, self.colors['shadow'], shadow_rect, border_radius=8)
-            
-            # Draw dice
-            dice_rect = pygame.Rect(dice_x - dice_size//2, dice_y - dice_size//2, dice_size, dice_size)
-            color = self.colors['gold'] if self.dice_type == 'healing' else self.colors['white']
-            pygame.draw.rect(self.screen, color, dice_rect, border_radius=8)
-            pygame.draw.rect(self.screen, self.colors['black'], dice_rect, 3, border_radius=8)
-            
-            # Draw spinning number
-            current_number = random.randint(1, 6)
-            self._draw_dice_face(dice_x, dice_y, current_number, dice_size)
+        dice_size = 80
         
-        # Draw "Rolling..." text
-        text = self.font.render("Rolling...", True, self.colors['black'])
+        if self.dice_type == 'blood_magic':
+            # Draw two dice side by side for Blood Magic
+            dice_spacing = 120
+            dice_positions = [center_x - dice_spacing//2, center_x + dice_spacing//2]
+            
+            for dice_idx in range(2):
+                dice_center_x = dice_positions[dice_idx]
+                
+                # Draw multiple dice for rolling effect
+                for i in range(3):
+                    offset_x = (i - 1) * 15
+                    offset_y = bounce_offset + (i * 3)
+                    
+                    dice_x = dice_center_x + offset_x
+                    dice_y = center_y + offset_y
+                    
+                    # Draw dice shadow
+                    shadow_rect = pygame.Rect(dice_x - dice_size//2 + 3, dice_y - dice_size//2 + 3, dice_size, dice_size)
+                    pygame.draw.rect(self.screen, self.colors['black'], shadow_rect, border_radius=8)
+                    
+                    # Draw dice
+                    dice_rect = pygame.Rect(dice_x - dice_size//2, dice_y - dice_size//2, dice_size, dice_size)
+                    color = self.colors['white'] if dice_idx == 0 else self.colors['shadow']  # Different colors for Blood Magic dice
+                    pygame.draw.rect(self.screen, color, dice_rect, border_radius=8)
+                    pygame.draw.rect(self.screen, self.colors['black'], dice_rect, 3, border_radius=8)
+                    
+                    # Draw spinning number
+                    current_number = random.randint(1, 6)
+                    self._draw_dice_face(dice_x, dice_y, current_number, dice_size)
+        else:
+            # Single die animation (normal or healing)
+            for i in range(3):
+                offset_x = (i - 1) * 20
+                offset_y = bounce_offset + (i * 5)
+                
+                dice_x = center_x + offset_x
+                dice_y = center_y + offset_y
+                
+                # Draw dice shadow
+                shadow_rect = pygame.Rect(dice_x - dice_size//2 + 3, dice_y - dice_size//2 + 3, dice_size, dice_size)
+                pygame.draw.rect(self.screen, self.colors['shadow'], shadow_rect, border_radius=8)
+                
+                # Draw dice
+                dice_rect = pygame.Rect(dice_x - dice_size//2, dice_y - dice_size//2, dice_size, dice_size)
+                color = self.colors['gold'] if self.dice_type == 'healing' else self.colors['white']
+                pygame.draw.rect(self.screen, color, dice_rect, border_radius=8)
+                pygame.draw.rect(self.screen, self.colors['black'], dice_rect, 3, border_radius=8)
+                
+                # Draw spinning number
+                current_number = random.randint(1, 6)
+                self._draw_dice_face(dice_x, dice_y, current_number, dice_size)
+        
+        # Draw rolling text
+        roll_text = "Blood Magic Rolling..." if self.dice_type == 'blood_magic' else "Rolling..."
+        text = self.font.render(roll_text, True, self.colors['black'])
         text_rect = text.get_rect(center=(center_x, center_y + 80))
         self.screen.blit(text, text_rect)
     
@@ -124,30 +168,69 @@ class DiceAnimator:
         # Pulsing glow effect
         glow_alpha = int(128 * (1 - reveal_elapsed / self.reveal_duration))
         
-        # Draw glow
-        glow_size = dice_size + 20
-        glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
-        glow_color = (*self.colors['gold'][:3], glow_alpha) if self.dice_type == 'healing' else (*self.colors['blue'][:3], glow_alpha)
-        pygame.draw.rect(glow_surf, glow_color, (0, 0, glow_size, glow_size), border_radius=12)
-        self.screen.blit(glow_surf, (center_x - glow_size//2, center_y - glow_size//2))
-        
-        # Draw final dice
-        dice_rect = pygame.Rect(center_x - dice_size//2, center_y - dice_size//2, dice_size, dice_size)
-        color = self.colors['gold'] if self.dice_type == 'healing' else self.colors['white']
-        pygame.draw.rect(self.screen, color, dice_rect, border_radius=10)
-        pygame.draw.rect(self.screen, self.colors['black'], dice_rect, 4, border_radius=10)
-        
-        # Draw final result
-        self._draw_dice_face(center_x, center_y, self.final_result, dice_size)
-        
-        # Draw result text
-        result_text = f"Result: {self.final_result}"
-        if self.dice_type == 'healing':
-            result_text += " (Healing)"
-        
-        text = self.large_font.render(result_text, True, self.colors['black'])
-        text_rect = text.get_rect(center=(center_x, center_y + dice_size//2 + 40))
-        self.screen.blit(text, text_rect)
+        if self.dice_type == 'blood_magic':
+            # Draw two dice side by side for Blood Magic reveal
+            dice_spacing = 140
+            dice_positions = [center_x - dice_spacing//2, center_x + dice_spacing//2]
+            dice_colors = [self.colors['white'], self.colors['shadow']]
+            
+            for dice_idx in range(2):
+                dice_center_x = dice_positions[dice_idx]
+                
+                # Draw glow
+                glow_size = dice_size + 20
+                glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+                glow_color = (*dice_colors[dice_idx][:3], glow_alpha)
+                pygame.draw.rect(glow_surf, glow_color, (0, 0, glow_size, glow_size), border_radius=12)
+                self.screen.blit(glow_surf, (dice_center_x - glow_size//2, center_y - glow_size//2))
+                
+                # Draw final dice
+                dice_rect = pygame.Rect(dice_center_x - dice_size//2, center_y - dice_size//2, dice_size, dice_size)
+                pygame.draw.rect(self.screen, dice_colors[dice_idx], dice_rect, border_radius=10)
+                pygame.draw.rect(self.screen, self.colors['black'], dice_rect, 4, border_radius=10)
+                
+                # Draw final result
+                self._draw_dice_face(dice_center_x, center_y, self.final_results[dice_idx], dice_size)
+                
+                # Draw die label
+                die_label = f"Die {dice_idx + 1}: {self.final_results[dice_idx]}"
+                label_font = pygame.font.Font(None, 36)
+                label_text = label_font.render(die_label, True, self.colors['black'])
+                label_rect = label_text.get_rect(center=(dice_center_x, center_y + dice_size//2 + 30))
+                self.screen.blit(label_text, label_rect)
+            
+            # Draw Blood Magic result text
+            result_text = f"Blood Magic Results: {self.final_results[0]} & {self.final_results[1]}"
+            text = self.font.render(result_text, True, self.colors['black'])
+            text_rect = text.get_rect(center=(center_x, center_y + dice_size//2 + 70))
+            self.screen.blit(text, text_rect)
+            
+        else:
+            # Single die reveal (normal or healing)
+            # Draw glow
+            glow_size = dice_size + 20
+            glow_surf = pygame.Surface((glow_size, glow_size), pygame.SRCALPHA)
+            glow_color = (*self.colors['gold'][:3], glow_alpha) if self.dice_type == 'healing' else (*self.colors['blue'][:3], glow_alpha)
+            pygame.draw.rect(glow_surf, glow_color, (0, 0, glow_size, glow_size), border_radius=12)
+            self.screen.blit(glow_surf, (center_x - glow_size//2, center_y - glow_size//2))
+            
+            # Draw final dice
+            dice_rect = pygame.Rect(center_x - dice_size//2, center_y - dice_size//2, dice_size, dice_size)
+            color = self.colors['gold'] if self.dice_type == 'healing' else self.colors['white']
+            pygame.draw.rect(self.screen, color, dice_rect, border_radius=10)
+            pygame.draw.rect(self.screen, self.colors['black'], dice_rect, 4, border_radius=10)
+            
+            # Draw final result
+            self._draw_dice_face(center_x, center_y, self.final_result, dice_size)
+            
+            # Draw result text
+            result_text = f"Result: {self.final_result}"
+            if self.dice_type == 'healing':
+                result_text += " (Healing)"
+            
+            text = self.large_font.render(result_text, True, self.colors['black'])
+            text_rect = text.get_rect(center=(center_x, center_y + dice_size//2 + 40))
+            self.screen.blit(text, text_rect)
     
     def _draw_dice_face(self, center_x, center_y, number, dice_size):
         """Draw the dots on a dice face"""
@@ -188,8 +271,7 @@ class DiceRollManager:
     
     def roll_blood_magic_dice(self, callback):
         """Roll two dice for blood magic choice"""
-        # For now, just roll one die - could be enhanced for dual dice
-        self.animator.start_roll_animation('normal', callback)
+        self.animator.start_roll_animation('blood_magic', callback, num_dice=2)
     
     def update_and_draw(self, center_x, center_y):
         """Update and draw current dice animation"""

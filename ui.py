@@ -1,5 +1,5 @@
 """
-Crystal Wizards - UI Helper Module
+Crystal Wizards - UI Helper Module (Fixed with Blood Magic Integration)
 Contains button classes and highlighting functionality for improved UX
 """
 
@@ -27,7 +27,7 @@ class Button:
         """Handle mouse events and return True if button was clicked"""
         if not self.enabled:
             return False
-            
+        
         mouse_pos = pygame.mouse.get_pos()
         self.is_hovered = self.rect.collidepoint(mouse_pos)
         
@@ -42,9 +42,9 @@ class Button:
                     sound_manager.play_sound("click")
                 return True  # Button was clicked
             self.is_pressed = False
-            
+        
         return False
-    
+        
     def draw(self, screen):
         """Draw the button on the screen"""
         if not self.enabled:
@@ -55,7 +55,7 @@ class Button:
             color = self.hover_color
         else:
             color = self.normal_color
-            
+        
         # Draw button background
         pygame.draw.rect(screen, color, self.rect)
         pygame.draw.rect(screen, self.border_color, self.rect, 2)
@@ -111,16 +111,16 @@ class HighlightManager:
             elif self.highlight_type == 'mine':
                 # Blue highlight for mining
                 pygame.draw.circle(highlight_surface, (0, 100, 255, 100), (radius, radius), radius)
-
             elif self.highlight_type == 'cast':
                 # Red highlight for casting spells
                 pygame.draw.circle(highlight_surface, (255, 0, 0, 100), (radius, radius), radius)
             else:
                 # Default yellow highlight
                 pygame.draw.circle(highlight_surface, (255, 255, 0, 100), (radius, radius), radius)
-                
+            
             # Blit the highlight surface to the screen
-            screen.blit(highlight_surface, (x - radius, y - radius))      
+            screen.blit(highlight_surface, (x - radius, y - radius))
+            
 
 class SoundManager:
     """Simple sound manager for game audio feedback"""
@@ -136,7 +136,7 @@ class SoundManager:
         except pygame.error:
             print("Warning: Could not initialize audio system. Sound disabled.")
             self.enabled = False
-            
+        
     def load_sound(self, name, filepath):
         """Load a sound file"""
         try:
@@ -144,12 +144,12 @@ class SoundManager:
         except pygame.error:
             print(f"Warning: Could not load sound {filepath}")
             self.sounds[name] = None
-            
+        
     def play_sound(self, name):
         """Play a loaded sound"""
         if self.enabled and name in self.sounds and self.sounds[name]:
             self.sounds[name].play()
-            
+        
     def set_enabled(self, enabled):
         """Enable or disable sound"""
         self.enabled = enabled
@@ -168,7 +168,7 @@ class ActionPanel:
         self.button_height = int(50 * scale_factor) 
         self.button_spacing = int(15 * scale_factor)
         
-        # Create action buttons in a 2x2 grid for better space usage
+        # Create action buttons in a 2x3 grid to accommodate Blood Magic
         self.move_button = Button(
             x, y, self.button_width, self.button_height,
             "Move", font, normal_color=(100, 200, 100)
@@ -189,24 +189,32 @@ class ActionPanel:
             "Cast Spell", font, normal_color=(200, 100, 100)
         )
         
-        self.end_turn_button = Button(
+        self.blood_magic_button = Button(
             x + self.button_width + self.button_spacing, button_row_2_y,
+            self.button_width, self.button_height,
+            "Blood Magic", font, normal_color=(150, 50, 150)
+        )
+        
+        # Third row
+        button_row_3_y = button_row_2_y + self.button_height + self.button_spacing
+        
+        self.end_turn_button = Button(
+            x, button_row_3_y,
             self.button_width, self.button_height,
             "End Turn", font, normal_color=(200, 200, 100)
         )
         
         # AI Failsafe button - only visible during AI turns
         self.ai_failsafe_button = Button(
-            x + 2 * (self.button_width + self.button_spacing), button_row_2_y,
+            x + self.button_width + self.button_spacing, button_row_3_y,
             self.button_width, self.button_height,
             "AI Failsafe", font, normal_color=(200, 100, 100)
         )
         self.ai_failsafe_button.enabled = False  # Hidden by default
 
-        self.buttons = [self.move_button, self.mine_button, self.cast_button, self.end_turn_button]
+        self.buttons = [self.move_button, self.mine_button, self.cast_button, 
+                       self.blood_magic_button, self.end_turn_button]
         self.selected_action = None
-
-        
         
     def handle_event(self, event, game):
         """Handle events for all buttons and return the action taken"""
@@ -216,32 +224,44 @@ class ActionPanel:
         self.move_button.enabled = game.can_move(current_player)
         self.mine_button.enabled = game.can_mine(current_player)
         self.cast_button.enabled = game.can_cast_spell(current_player)
+        
+        # Blood Magic is enabled if player has health > 1 and has laid down cards
+        self.blood_magic_button.enabled = (
+            current_player.health > 1 and 
+            len(current_player.cards_laid_down) > 0 and
+            game.can_mine(current_player)
+        )
+        
         self.end_turn_button.enabled = True
         
         # Handle button clicks
         if self.move_button.handle_event(event):
             self.selected_action = 'move' if self.selected_action != 'move' else None
             return 'move_selected'
-            
+        
         if self.mine_button.handle_event(event):
             self.selected_action = 'mine' if self.selected_action != 'mine' else None
             return 'mine_selected'
-            
+        
         if self.cast_button.handle_event(event):
             self.selected_action = 'cast' if self.selected_action != 'cast' else None
             return 'cast_selected'
             
+        if self.blood_magic_button.handle_event(event):
+            self.selected_action = 'blood_magic' if self.selected_action != 'blood_magic' else None
+            return 'blood_magic_selected'
+        
         if self.end_turn_button.handle_event(event):
             self.selected_action = None
             return 'end_turn'
-            
+        
         return None
         
     def draw(self, screen):
         """Draw all buttons"""
         for button in self.buttons:
             button.draw(screen)
-            
+        
         # Draw AI failsafe button if enabled
         if self.ai_failsafe_button.enabled:
             self.ai_failsafe_button.draw(screen)
@@ -253,19 +273,21 @@ class ActionPanel:
             pygame.draw.rect(screen, (0, 0, 255), self.mine_button.rect, 3)
         elif self.selected_action == 'cast':
             pygame.draw.rect(screen, (255, 0, 0), self.cast_button.rect, 3)
+        elif self.selected_action == 'blood_magic':
+            pygame.draw.rect(screen, (150, 50, 150), self.blood_magic_button.rect, 3)
 
     def handle_ai_event(self, event):
         """Handle AI-related events and return action if failsafe is triggered"""
         # Only process events if AI failsafe button is enabled (during AI turns)
         if not self.ai_failsafe_button.enabled:
             return None
-            
+        
         # Check if AI failsafe button was clicked
         if self.ai_failsafe_button.handle_event(event):
             return 'ai_failsafe'
-            
+        
         return None
-    
+        
     def set_ai_turn_state(self, is_ai_turn):
         """Enable/disable AI failsafe button based on whether it's an AI turn"""
         self.ai_failsafe_button.enabled = is_ai_turn
