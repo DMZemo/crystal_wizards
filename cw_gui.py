@@ -10,6 +10,7 @@ import math
 import os
 import sys
 import pygame
+from pathlib import Path
 from cw_entities import AIWizard
 from cw_game import CrystalWizardsGame
 from ui import Button, HighlightManager, ActionPanel
@@ -17,6 +18,18 @@ from sound_manager import sound_manager
 from dice_animation import DiceRollManager
 from blood_magic_choice_dialog import BloodMagicChoiceDialog
 from blood_magic_dialog import BloodMagicDialog
+from help_menu_system import PauseMenuDialog
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = Path(sys._MEIPASS)
+    except AttributeError:
+        # Running in development mode
+        base_path = Path(__file__).parent
+    
+    return base_path / relative_path
 
 # Colors
 COLORS = {
@@ -505,8 +518,8 @@ class GameGUI:
         self.blood_magic_choice_dialog = BloodMagicChoiceDialog(self.screen, self.font_medium, self.font_large)
         self.blood_magic_dialog = BloodMagicDialog(self.screen, self.font_medium, self.font_large)
         
-        # Quit dialog
-        self.quit_dialog = QuitConfirmDialog(self.screen, self.font_large)
+        # Pause Menu dialog
+        self.pause_menu = PauseMenuDialog(self.screen, self.font_medium, self.font_large)
         
         # Load and scale background image
         self._load_background_image()
@@ -518,11 +531,16 @@ class GameGUI:
     def _load_background_image(self):
         """Load and scale the background image to fit the screen"""
         try:
-            # Load the background image
-            bg_path = os.path.join("crystal_wizards_background.png")
-            self.bg_original = pygame.image.load(bg_path).convert()
-            # Scale to current screen size
-            self.bg_scaled = pygame.transform.scale(self.bg_original, (self.screen_width, self.screen_height))
+            # Load the background image using resource_path for PyInstaller compatibility
+            bg_path = resource_path("sounds/crystal_wizards_background.png")
+            if bg_path.exists():
+                self.bg_original = pygame.image.load(str(bg_path)).convert()
+                # Scale to current screen size
+                self.bg_scaled = pygame.transform.scale(self.bg_original, (self.screen_width, self.screen_height))
+            else:
+                print(f"Warning: Background image not found at {bg_path}")
+                self.bg_original = None
+                self.bg_scaled = self._create_fallback_background()
         except (pygame.error, FileNotFoundError) as e:
             print(f"Warning: Could not load background image: {e}")
             # Create a fallback gradient background
@@ -733,9 +751,12 @@ class GameGUI:
             if not self.is_dice_rolling:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        if self.quit_dialog.run_modal():
+                        result = self.pause_menu.run_modal()
+                        if result == 'quit':
                             running = False
                             break
+                        elif result == 'resume':
+                            continue
                     elif event.type == pygame.MOUSEBUTTONDOWN:
                         # Check if Blood Magic dialogs should handle the event first
                         if hasattr(self, 'blood_magic_choice_dialog') and self.blood_magic_choice_dialog.handle_event(event):
@@ -756,9 +777,12 @@ class GameGUI:
                         if hasattr(self, 'blood_magic_dialog') and self.blood_magic_dialog.handle_event(event):
                             continue
                         if event.key == pygame.K_ESCAPE:
-                            if self.quit_dialog.run_modal():
+                            result = self.pause_menu.run_modal()
+                            if result == 'quit':
                                 running = False
                                 break
+                            elif result == 'resume':
+                                continue
                         else:
                             self.handle_key_press(event.key)
                     elif event.type == pygame.MOUSEMOTION:

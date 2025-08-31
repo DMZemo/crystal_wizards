@@ -5,7 +5,20 @@ Handles all audio effects and music for the game
 
 import pygame
 import os
+import sys
 import random
+from pathlib import Path
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = Path(sys._MEIPASS)
+    except AttributeError:
+        # Running in development mode
+        base_path = Path(__file__).parent
+    
+    return base_path / relative_path
 
 class SoundManager:
     """Manages all sound effects and music for Crystal Wizards"""
@@ -29,25 +42,22 @@ class SoundManager:
         if not self.mixer_available:
             return
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        def p(name):
-            return os.path.join(base_dir, 'sounds', name)
-
         sound_files = {
-            'twinkle': p('twinkle.wav'),
-            'spell_cast': p('spell_cast.wav'),
-            'teleport': p('teleport.wav'),
-            'dice_roll': p('dice_roll.wav'),
-            'move': p('move.wav'),
-            'mine': p('mine.wav'),
-            'charge': p('charge.wav'),
-            'heal': p('heal.wav'),
+            'twinkle': 'sounds/twinkle.wav',
+            'spell_cast': 'sounds/spell_cast.wav',
+            'teleport': 'sounds/teleport.wav',
+            'dice_roll': 'sounds/dice_roll.wav',
+            'move': 'sounds/move.wav',
+            'mine': 'sounds/mine.wav',
+            'charge': 'sounds/charge.wav',
+            'heal': 'sounds/heal.wav',
         }
 
-        for sound_name, file_path in sound_files.items():
+        for sound_name, relative_path in sound_files.items():
             try:
-                if os.path.exists(file_path):
-                    sound = pygame.mixer.Sound(file_path)
+                file_path = resource_path(relative_path)
+                if file_path.exists():
+                    sound = pygame.mixer.Sound(str(file_path))
                     sound.set_volume(self.volume)
                     self.sounds[sound_name] = sound
                 else:
