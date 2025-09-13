@@ -10,7 +10,7 @@ Key Fixes:
 4. Added comprehensive logging for debugging
 5. Robust error handling and recovery mechanisms
 6. Simplified action loop logic to prevent deadlocks
-7. FIXED: AI healing prioritization - AI now actively seeks healing springs when injured
+7. FIXED: AI mining prioritization - AI now properly handles center white mine like other mines
 8. FIXED: White crystal spell casting - White crystals can now fulfill ANY spell requirements
 9. FIXED: Blocking behavior - Easy/Medium always block when crystals available, Hard uses strategy
 """
@@ -250,21 +250,11 @@ class StrategicAI:
                 # White crystal mining (no dice needed)
                 if (game.board.has_crystals_at_position(pos) and 
                     not game.board.is_mine(pos) and 
-                    not game.board.is_healing_springs(pos) and
                     self.wizard.can_hold_more_crystals()):
                     actions.append({
                         'type': 'mine_white',
                         'position': pos,
                         'priority': 60
-                    })
-                    
-                # Healing springs - FIXED: Higher priority when health is low
-                if game.board.is_healing_springs(pos) and self.wizard.health < 6:
-                    heal_value = 90 if self.wizard.health <= 2 else (70 if self.wizard.health <= 3 else 50)
-                    actions.append({
-                        'type': 'heal',
-                        'position': pos,
-                        'priority': heal_value
                     })
                     
                 # Colored crystal mining
@@ -437,35 +427,9 @@ class StrategicAI:
                 'priority': priority
             })
             
-        # FIXED: Add pathfinding to healing springs when injured
-        if self.wizard.health <= 3:
-            healing_positions = self._find_path_to_healing_springs(game)
-            for pos in healing_positions:
-                if pos not in adjacent_positions:  # Don't duplicate adjacent positions
-                    # High priority for moving toward healing when injured
-                    heal_priority = 80 if self.wizard.health <= 2 else 60
-                    actions.append({
-                        'type': 'move',
-                        'target': pos,
-                        'priority': heal_priority
-                    })
+
                     
-    def _find_path_to_healing_springs(self, game):
-        """FIXED: Find positions that lead toward healing springs"""
-        healing_positions = []
-        current_pos = self.wizard.location
-        
-        # Find all healing springs positions
-        for pos, data in game.board.positions.items():
-            if data.get('type') == 'healing_springs':
-                # Get adjacent positions to healing springs
-                adjacent_to_healing = game.board.get_adjacent_empty_positions(pos)
-                for adj_pos in adjacent_to_healing:
-                    # Check if this position is reachable from current position
-                    if game.board.is_adjacent(current_pos, adj_pos):
-                        healing_positions.append(adj_pos)
-                        
-        return healing_positions
+
         
     def _calculate_movement_priority(self, position, game):
         """FIXED: Calculate priority for moving to a specific position with enhanced healing logic"""
@@ -482,17 +446,7 @@ class StrategicAI:
             else:
                 base_priority += 15
                 
-        # FIXED: Enhanced healing springs prioritization
-        if game.board.is_healing_springs(position) and self.wizard.health < 6:
-            heal_need = (6 - self.wizard.health) * 20  # Increased multiplier for stronger prioritization
-            base_priority += heal_need
-            
-        # FIXED: Bonus for positions adjacent to healing springs when injured
-        if self.wizard.health <= 3:
-            for pos, data in game.board.positions.items():
-                if data.get('type') == 'healing_springs':
-                    if game.board.is_adjacent(position, pos):
-                        base_priority += 40  # High bonus for getting close to healing
+
                         
         # Strategic positioning
         if self.strategy_mode == 'aggressive':
@@ -716,14 +670,8 @@ class StrategicAI:
         # Try white crystal mining first
         if (game.board.has_crystals_at_position(pos) and 
             not game.board.is_mine(pos) and 
-            not game.board.is_healing_springs(pos) and
             self.wizard.can_hold_more_crystals()):
             return game.mine_white_crystal(self.wizard, pos)
-            
-        # Try healing
-        if game.board.is_healing_springs(pos) and self.wizard.health < 6:
-            roll = random.randint(1, 3)
-            return game.resolve_mine_with_roll(self.wizard, pos, roll)
             
         # Try colored mining
         if game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():

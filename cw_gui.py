@@ -8,6 +8,7 @@ names otherwise. It also adds a quit confirmation dialog on Esc or window close.
 
 import math
 import os
+import random
 import sys
 import pygame
 from pathlib import Path
@@ -144,10 +145,11 @@ class BlockingDialog:
         self.visible = False
         self.result = None  # Amount of damage blocked (None means still deciding)
         
-        # UI state
+        # UI state - only allow blocking 1 damage with 1 crystal
         self.crystals_to_spend = {'red': 0, 'blue': 0, 'green': 0, 'yellow': 0, 'white': 0}
-        self.max_crystals = min(damage, wizard.get_total_crystals_for_blocking())
+        self.max_crystals = min(1, wizard.get_total_crystals_for_blocking())  # Maximum 1 crystal can be used
         self.total_selected = 0
+        self.selected_crystal_color = None  # Track which single crystal is selected
         
         # Calculate dialog dimensions
         sw, sh = self.screen.get_size()
@@ -202,45 +204,8 @@ class BlockingDialog:
                         crystals_spent[color] = actual_spent
                         total_blocked += actual_spent
             
-            # Handle crystal distribution using new blocking rules
-            if self.game and crystals_spent and self.caster:
-                attacker_color = getattr(self.caster, 'color', None)
-                crystals_to_attacker = {}
-                crystals_to_board = {}
-                
-                for color, amount in crystals_spent.items():
-                    if amount > 0:
-                        # If blocking crystals match attacker's color, try to give them to attacker
-                        if color == attacker_color:
-                            # Calculate how many crystals can fit in attacker's reserve (max 6 total)
-                            attacker_total = sum(self.caster.crystals.values())
-                            space_available = max(0, 6 - attacker_total)
-                            crystals_to_give = min(amount, space_available)
-                            
-                            if crystals_to_give > 0:
-                                crystals_to_attacker[color] = crystals_to_give
-                                # Add crystals to attacker's reserve
-                                self.caster.crystals[color] = self.caster.crystals.get(color, 0) + crystals_to_give
-                            
-                            # Any excess goes to board
-                            excess = amount - crystals_to_give
-                            if excess > 0:
-                                crystals_to_board[color] = excess
-                        else:
-                            # Non-matching crystals go to board normally
-                            crystals_to_board[color] = amount
-                
-                # Return non-matching crystals to board
-                if crystals_to_board:
-                    self.game.return_crystals_to_board(crystals_to_board, self.wizard.location)
-                    
-                # Log crystal transfers to attacker
-                if crystals_to_attacker:
-                    total_transferred = sum(crystals_to_attacker.values())
-                    self.game.action_log.append(f"{total_transferred} {attacker_color} crystal(s) transferred to {self.caster.color.title()} Wizard's reserve!")
-            
-            elif self.game and crystals_spent:
-                # Fallback to old behavior if no caster specified
+            # All blocking crystals return to board
+            if self.game and crystals_spent:
                 crystals_to_return = {color: amount for color, amount in crystals_spent.items() if amount > 0}
                 if crystals_to_return:
                     self.game.return_crystals_to_board(crystals_to_return, self.wizard.location)
@@ -251,8 +216,8 @@ class BlockingDialog:
         self.visible = False
 
     def _handle_mouse_click(self, mx, my):
-        """Handle mouse clicks in the blocking dialog"""
-        # Crystal selection buttons (+ and - for each color)
+        """Handle mouse clicks in the blocking dialog - single crystal selection only"""
+        # Crystal selection (click to select/deselect a single crystal)
         colors = ['red', 'blue', 'green', 'yellow', 'white']
         crystal_section_y = self.dialog_y + 150
         
@@ -260,23 +225,26 @@ class BlockingDialog:
             if self.wizard.crystals.get(color, 0) == 0:
                 continue  # Skip colors the wizard doesn't have
                 
-            # Calculate button positions for this color
+            # Calculate crystal button area for this color (larger clickable area)
             crystal_x = self.dialog_x + 60 + i * 110
-            plus_rect = pygame.Rect(crystal_x + 70, crystal_section_y + 30, 30, 25)
-            minus_rect = pygame.Rect(crystal_x + 10, crystal_section_y + 30, 30, 25)
+            crystal_rect = pygame.Rect(crystal_x, crystal_section_y + 10, 80, 60)
             
-            if plus_rect.collidepoint(mx, my):
-                # Increase this color if possible
-                available = self.wizard.crystals.get(color, 0)
-                current = self.crystals_to_spend[color]
-                if current < available and self.total_selected < self.max_crystals:
-                    self.crystals_to_spend[color] += 1
-                    self.total_selected += 1
-            elif minus_rect.collidepoint(mx, my):
-                # Decrease this color
-                if self.crystals_to_spend[color] > 0:
-                    self.crystals_to_spend[color] -= 1
-                    self.total_selected -= 1
+            if crystal_rect.collidepoint(mx, my):
+                # Toggle crystal selection (only one crystal can be selected at a time)
+                if self.selected_crystal_color == color:
+                    # Deselect current crystal
+                    self.crystals_to_spend[color] = 0
+                    self.total_selected = 0
+                    self.selected_crystal_color = None
+                else:
+                    # Clear any previously selected crystal
+                    if self.selected_crystal_color:
+                        self.crystals_to_spend[self.selected_crystal_color] = 0
+                    
+                    # Select new crystal
+                    self.crystals_to_spend[color] = 1
+                    self.total_selected = 1
+                    self.selected_crystal_color = color
         
         # Action buttons
         button_y = self.dialog_y + self.dialog_h - 60
@@ -351,65 +319,64 @@ class BlockingDialog:
             # Calculate positions for this crystal type
             crystal_x = self.dialog_x + 60 + i * 110
             
+            # Clickable crystal area
+            crystal_rect = pygame.Rect(crystal_x, crystal_section_y + 10, 80, 60)
+            is_selected = self.selected_crystal_color == color
+            
+            # Background highlighting for selected crystal
+            if is_selected:
+                pygame.draw.rect(self.screen, (100, 100, 150), crystal_rect, border_radius=8)
+                pygame.draw.rect(self.screen, (255, 255, 100), crystal_rect, 3, border_radius=8)
+            else:
+                pygame.draw.rect(self.screen, (60, 60, 80), crystal_rect, border_radius=8)
+                pygame.draw.rect(self.screen, (150, 150, 150), crystal_rect, 2, border_radius=8)
+            
             # Crystal color indicator
             crystal_color = color_map[color]
-            pygame.draw.circle(self.screen, crystal_color, (crystal_x + 50, crystal_section_y + 15), 15)
-            pygame.draw.circle(self.screen, (255, 255, 255), (crystal_x + 50, crystal_section_y + 15), 15, 2)
+            circle_y = crystal_section_y + 20
+            pygame.draw.circle(self.screen, crystal_color, (crystal_x + 40, circle_y), 12)
+            pygame.draw.circle(self.screen, (255, 255, 255), (crystal_x + 40, circle_y), 12, 2)
             
             # Color label
             color_label = color.title()
-            label_surface = pygame.font.Font(None, 40).render(color_label, True, (255, 255, 255))
-            label_x = crystal_x + 50 - label_surface.get_width() // 2
+            label_surface = pygame.font.Font(None, 32).render(color_label, True, (255, 255, 255))
+            label_x = crystal_x + 40 - label_surface.get_width() // 2
             self.screen.blit(label_surface, (label_x, crystal_section_y + 35))
             
             # Available count
-            available_text = f"Have: {available}"
-            available_surface = pygame.font.Font(None, 36).render(available_text, True, (200, 200, 200))
-            available_x = crystal_x + 50 - available_surface.get_width() // 2
-            self.screen.blit(available_surface, (available_x, crystal_section_y + 55))
+            available_text = f"({available})"
+            available_surface = pygame.font.Font(None, 28).render(available_text, True, (200, 200, 200))
+            available_x = crystal_x + 40 - available_surface.get_width() // 2
+            self.screen.blit(available_surface, (available_x, crystal_section_y + 50))
             
-            # Selected count
-            selected = self.crystals_to_spend[color]
-            selected_text = f"Use: {selected}"
-            selected_color = (255, 255, 100) if selected > 0 else (150, 150, 150)
-            selected_surface = pygame.font.Font(None, 36).render(selected_text, True, selected_color)
-            selected_x = crystal_x + 50 - selected_surface.get_width() // 2
-            self.screen.blit(selected_surface, (selected_x, crystal_section_y + 75))
-            
-            # Plus button
-            plus_rect = pygame.Rect(crystal_x + 70, crystal_section_y + 30, 30, 25)
-            can_add = selected < available and self.total_selected < self.max_crystals
-            plus_color = (0, 150, 0) if can_add else (80, 80, 80)
-            pygame.draw.rect(self.screen, plus_color, plus_rect, border_radius=5)
-            pygame.draw.rect(self.screen, (255, 255, 255), plus_rect, 2, border_radius=5)
-            plus_text = pygame.font.Font(None, 48).render("+", True, (255, 255, 255))
-            plus_text_rect = plus_text.get_rect(center=plus_rect.center)
-            self.screen.blit(plus_text, plus_text_rect)
-            
-            # Minus button
-            minus_rect = pygame.Rect(crystal_x + 10, crystal_section_y + 30, 30, 25)
-            can_remove = selected > 0
-            minus_color = (150, 0, 0) if can_remove else (80, 80, 80)
-            pygame.draw.rect(self.screen, minus_color, minus_rect, border_radius=5)
-            pygame.draw.rect(self.screen, (255, 255, 255), minus_rect, 2, border_radius=5)
-            minus_text = pygame.font.Font(None, 48).render("-", True, (255, 255, 255))
-            minus_text_rect = minus_text.get_rect(center=minus_rect.center)
-            self.screen.blit(minus_text, minus_text_rect)
+            # Selection indicator
+            if is_selected:
+                select_text = "SELECTED"
+                select_surface = pygame.font.Font(None, 24).render(select_text, True, (255, 255, 100))
+                select_x = crystal_x + 40 - select_surface.get_width() // 2
+                self.screen.blit(select_surface, (select_x, crystal_section_y + 75))
         
         # Summary section
         summary_y = self.dialog_y + 280
         
-        # Blocking summary
-        final_damage = max(0, self.damage - self.total_selected)
-        summary_text = f"Crystals to spend: {self.total_selected} / {self.max_crystals}"
-        summary_surface = pygame.font.Font(None, 52).render(summary_text, True, (255, 255, 100))
+        # Blocking summary - show new mechanics
+        if self.total_selected > 0:
+            summary_text = f"Selected: 1 {self.selected_crystal_color} crystal (blocks 1 damage)"
+            summary_color = (100, 255, 100)
+        else:
+            summary_text = "No crystal selected (blocks 0 damage)"
+            summary_color = (255, 200, 200)
+        
+        summary_surface = pygame.font.Font(None, 48).render(summary_text, True, summary_color)
         summary_x = self.dialog_x + (self.dialog_w - summary_surface.get_width()) // 2
         self.screen.blit(summary_surface, (summary_x, summary_y))
         
-        # Damage preview
-        damage_preview = f"Final damage: {final_damage} (blocked: {self.total_selected})"
-        preview_color = (100, 255, 100) if self.total_selected > 0 else (255, 200, 200)
-        preview_surface = pygame.font.Font(None, 48).render(damage_preview, True, preview_color)
+        # Damage preview - updated for 1 crystal = 1 damage blocked maximum
+        damage_blocked = min(1, self.total_selected)  # Maximum 1 damage can be blocked
+        final_damage = max(0, self.damage - damage_blocked)
+        damage_preview = f"Incoming: {self.damage} damage → You take: {final_damage} damage"
+        preview_color = (100, 255, 100) if damage_blocked > 0 else (255, 200, 200)
+        preview_surface = pygame.font.Font(None, 44).render(damage_preview, True, preview_color)
         preview_x = self.dialog_x + (self.dialog_w - preview_surface.get_width()) // 2
         self.screen.blit(preview_surface, (preview_x, summary_y + 30))
         
@@ -440,8 +407,8 @@ class BlockingDialog:
         self.screen.blit(skip_surface, skip_text_rect)
         
         # Instructions
-        instruction_text = "Click +/- to select crystals, then Confirm or Skip. Press Enter to confirm."
-        instruction_surface = pygame.font.Font(None, 36).render(instruction_text, True, (180, 180, 180))
+        instruction_text = "Click on a crystal to select it (1 crystal blocks 1 damage max). Press Enter to confirm."
+        instruction_surface = pygame.font.Font(None, 32).render(instruction_text, True, (180, 180, 180))
         instruction_x = self.dialog_x + (self.dialog_w - instruction_surface.get_width()) // 2
         self.screen.blit(instruction_surface, (instruction_x, self.dialog_y + self.dialog_h - 20))
 
@@ -964,6 +931,17 @@ class GameGUI:
             if self.highlight_manager.is_highlighted(position):
                 self.initiate_mine_sequence(current_player, position)
                 return
+        
+        if self.current_action_mode == 'teleport_choice':
+            print(f"DEBUG: In teleport_choice mode, clicked position: {position}")
+            print(f"DEBUG: Is position highlighted? {self.highlight_manager.is_highlighted(position)}")
+            if self.highlight_manager.is_highlighted(position):
+                print(f"DEBUG: Completing teleportation to {position}")
+                # Complete the teleportation to the chosen position
+                self.complete_teleportation(self.teleport_choice_player, position)
+                return
+            else:
+                print(f"DEBUG: Position not highlighted, ignoring click")
 
 
     def initiate_mine_sequence(self, player, position):
@@ -986,7 +964,7 @@ class GameGUI:
             not isinstance(player, AIWizard)):
             
             mine_color = self.game.board.get_mine_color_from_position(position)
-            if mine_color and mine_color == player.color:
+            if mine_color and (mine_color == player.color or mine_color == 'white'):
                 # Show Blood Magic choice dialog
                 self.show_blood_magic_choice(player, position)
                 return
@@ -994,10 +972,13 @@ class GameGUI:
         self.is_dice_rolling = True
         self.pending_action = {'player': player, 'position': position}
 
-        if self.game.board.is_healing_springs(position):
-            self.dice_manager.roll_healing_dice(self.resolve_mine_sequence)
-        elif self.game.board.is_mine(position):
-            self.dice_manager.roll_mine_dice(self.resolve_mine_sequence)
+        if self.game.board.is_mine(position):
+            if position == 'center':
+                # White mine uses healing dice (with updated values)
+                self.dice_manager.roll_healing_dice(self.resolve_mine_sequence)
+            else:
+                # Regular colored mines use standard dice
+                self.dice_manager.roll_mine_dice(self.resolve_mine_sequence)
         else:
             self.is_dice_rolling = False
             self.pending_action = None
@@ -1025,9 +1006,130 @@ class GameGUI:
                 self.sound_manager.play_teleport()
             elif position != 'center':
                 self.sound_manager.play_mine()
+            
+            # Handle white mine teleportation choice
+            print(f"DEBUG: Checking teleport condition - position: {position}, player.location: {player.location}, old_location: {old_location}")
+            if position == 'center' and player.location == old_location:
+                print(f"DEBUG: Teleport condition met! Calling show_teleportation_choice_dialog")
+                # Player mined from center but didn't teleport yet - choice needed
+                self.show_teleportation_choice_dialog(player)
+                return  # Don't clear pending action until teleportation is complete
+            else:
+                print(f"DEBUG: Teleport condition NOT met")
 
         self.pending_action = None
         self.current_action_mode = None
+        self.highlight_manager.clear_highlights()
+
+    def show_teleportation_choice_dialog(self, player):
+        """Show teleportation choice for white mine - highlight outer hex positions for selection."""
+        print(f"DEBUG: show_teleportation_choice_dialog called for player {player.color}")
+        
+        # Get all outer hex positions
+        outer_hex_positions = self.game.board.layout.get_outer_ring_positions()
+        print(f"DEBUG: Outer hex positions: {outer_hex_positions}")
+        
+        # Check if this is an AI player
+        if hasattr(player, 'ai') and player.ai is not None:
+            print(f"DEBUG: AI player detected, making automatic teleportation choice")
+            # AI automatically chooses a teleportation destination
+            available_positions = [pos for pos in outer_hex_positions if len(self.game.board.get_wizard_at_position(pos)) == 0]
+            
+            if available_positions:
+                # AI chooses based on strategic value
+                chosen_position = self._ai_choose_teleport_destination(player, available_positions)
+                print(f"DEBUG: AI chose to teleport to {chosen_position}")
+                self.complete_teleportation(player, chosen_position)
+                return
+            else:
+                print(f"DEBUG: No available teleportation positions, AI stays at center")
+                # No valid teleportation positions, clear state and continue
+                self.pending_action = None
+                self.current_action_mode = None
+                self.highlight_manager.clear_highlights()
+                return
+        
+        # Human player - set up GUI for manual selection
+        # Highlight all outer hex positions for selection
+        self.highlight_manager.set_teleport_highlights(outer_hex_positions)
+        print(f"DEBUG: Set teleport highlights for {len(outer_hex_positions)} positions")
+        
+        # Set current mode to teleportation choice
+        self.current_action_mode = 'teleport_choice'
+        self.teleport_choice_player = player
+        print(f"DEBUG: Set action mode to 'teleport_choice'")
+        
+        # Add visual feedback
+        self.game.action_log.append(f"Click on an outer hex space to teleport to!")
+        print(f"DEBUG: Added message to action log")
+    
+    def _ai_choose_teleport_destination(self, player, available_positions):
+        """AI logic to choose the best teleportation destination."""
+        if not available_positions:
+            return None
+            
+        best_position = None
+        best_score = -1000
+        
+        for position in available_positions:
+            score = 0
+            
+            # Score based on resources at position
+            if self.game.board.has_crystals_at_position(position):
+                score += 30  # White crystals are valuable
+                
+            if self.game.board.is_mine(position):
+                mine_color = self.game.board.get_mine_color_from_position(position)
+                if mine_color == player.color:
+                    score += 40  # Prefer own color mine
+                else:
+                    score += 20  # Any mine is decent
+                    
+            # Score based on distance from enemies (defensive)
+            enemies = [p for p in self.game.players if p != player]
+            min_enemy_distance = float('inf')
+            for enemy in enemies:
+                try:
+                    distance = self.game.board.get_distance(position, enemy.location)
+                    min_enemy_distance = min(min_enemy_distance, distance)
+                except:
+                    distance = 3  # Default safe distance if calculation fails
+                    
+            if min_enemy_distance == float('inf'):
+                min_enemy_distance = 3  # No enemies found, assume safe
+                
+            # Prefer positions not too close to enemies (but not too far either)
+            if min_enemy_distance >= 2:
+                score += 10  # Safe distance
+            elif min_enemy_distance >= 3:
+                score += 5   # Maybe too far from action
+                
+            # Add small random factor to prevent predictability
+            score += random.randint(-5, 5)
+            
+            if score > best_score:
+                best_score = score
+                best_position = position
+                
+        return best_position if best_position else random.choice(available_positions)
+
+    def complete_teleportation(self, player, target_position):
+        """Complete the teleportation after player choice."""
+        old_location = player.location
+        
+        # Perform the teleportation
+        self.game.board.remove_wizard_from_position(old_location, player)
+        player.location = target_position
+        self.game.board.add_wizard_to_position(target_position, player)
+        
+        # Log and play sound
+        self.game.action_log.append(f"{player.color.title()} teleported to {target_position}!")
+        self.sound_manager.play_teleport()
+        
+        # Clear the action state
+        self.pending_action = None
+        self.current_action_mode = None
+        self.teleport_choice_player = None
         self.highlight_manager.clear_highlights()
 
     def show_reserve_full_warning(self):
@@ -1055,13 +1157,21 @@ class GameGUI:
         """Handle Blood Magic mining with two dice."""
         import random
         
-        # Roll two dice
-        dice1 = random.randint(1, 6)
-        dice2 = random.randint(1, 6)
+        # Roll two dice - use healing dice for white mine, regular dice for colored mines
+        if position == 'center':
+            # White mine uses healing dice (3, 2, 2, 1, 1, 1)
+            healing_die_faces = [3, 2, 2, 1, 1, 1]
+            dice1 = random.choice(healing_die_faces)
+            dice2 = random.choice(healing_die_faces)
+        else:
+            # Regular colored mines use standard dice
+            dice1 = random.randint(1, 6)
+            dice2 = random.randint(1, 6)
         
         def on_dice_assignment(mining_die, health_die):
             # Apply health - set to die result (Blood Magic risk/reward mechanic)
             old_health = player.health
+            old_location = player.location
             player.health = health_die  # Set health to die result, not add to it
             health_change = health_die - old_health
             
@@ -1073,17 +1183,47 @@ class GameGUI:
             else:
                 self.game.action_log.append(f"{player.color.title()} Wizard's health remains {health_die} from Blood Magic!")
             
+            # Set up pending action for teleportation handling (same as regular mining)
+            self.pending_action = {'player': player, 'position': position}
+            
             # Then resolve mining with the chosen die
             success = self.game.resolve_mine_with_roll(player, position, mining_die)
             
             if success == "reserve_full":
                 self.show_reserve_full_warning()
+                # Clear pending action on failure
+                self.pending_action = None
+                self.current_action_mode = None
+                self.highlight_manager.clear_highlights()
             elif success:
-                self.sound_manager.play_mine()
-                self.game.action_log.append(f"{player.color.title()} Wizard used Blood Magic! Health: +{health_die}, Mining: {mining_die}")
-            
-            self.current_action_mode = None
-            self.highlight_manager.clear_highlights()
+                if player.health > old_health:
+                    self.sound_manager.play_heal()
+                if player.location != old_location:
+                    self.sound_manager.play_teleport()
+                elif position != 'center':
+                    self.sound_manager.play_mine()
+                
+                self.game.action_log.append(f"{player.color.title()} Wizard used Blood Magic! Health: {health_die}, Mining: {mining_die}")
+                
+                # Handle white mine teleportation choice (same as regular mining)
+                print(f"DEBUG: Blood Magic - Checking teleport condition - position: {position}, player.location: {player.location}, old_location: {old_location}")
+                if position == 'center' and player.location == old_location:
+                    print(f"DEBUG: Blood Magic - Teleport condition met! Calling show_teleportation_choice_dialog")
+                    # Player mined from center but didn't teleport yet - choice needed
+                    self.show_teleportation_choice_dialog(player)
+                    return  # Don't clear pending action until teleportation is complete
+                else:
+                    print(f"DEBUG: Blood Magic - Teleport condition NOT met")
+                
+                # Clear pending action if no teleportation needed
+                self.pending_action = None
+                self.current_action_mode = None
+                self.highlight_manager.clear_highlights()
+            else:
+                # Clear pending action on failure
+                self.pending_action = None
+                self.current_action_mode = None
+                self.highlight_manager.clear_highlights()
         
         # Show the Blood Magic dialog for dice assignment
         self.blood_magic_dialog.show(dice1, dice2, player.color, on_dice_assignment)
@@ -1093,10 +1233,13 @@ class GameGUI:
         self.is_dice_rolling = True
         self.pending_action = {'player': player, 'position': position}
         
-        if self.game.board.is_healing_springs(position):
-            self.dice_manager.roll_healing_dice(self.resolve_mine_sequence)
-        elif self.game.board.is_mine(position):
-            self.dice_manager.roll_mine_dice(self.resolve_mine_sequence)
+        if self.game.board.is_mine(position):
+            if position == 'center':
+                # White mine uses healing dice (3, 2, 2, 1, 1, 1)
+                self.dice_manager.roll_healing_dice(self.resolve_mine_sequence)
+            else:
+                # Regular colored mines use standard dice
+                self.dice_manager.roll_mine_dice(self.resolve_mine_sequence)
         else:
             self.is_dice_rolling = False
             self.pending_action = None
@@ -1262,12 +1405,16 @@ class GameGUI:
         x, y = coords
 
         if position == 'center':
+            # Draw white mine
             pygame.draw.circle(self.screen, COLORS['white'], (x, y), 35)
             pygame.draw.circle(self.screen, COLORS['black'], (x, y), 35, 2)
-            pygame.draw.circle(self.screen, COLORS['light_blue'], (x, y), 20)
-            text = self.font_small.render("H", True, COLORS['blue'])
-            text_rect = text.get_rect(center=(x, y))
-            self.screen.blit(text, text_rect)
+            # Show crystal count for white mine
+            mine_color = self.game.board.get_mine_color_from_position(position)
+            if mine_color:
+                crystal_count = self.game.board.mines[mine_color]['crystals']
+                text = self.font_small.render(str(crystal_count), True, COLORS['black'])
+                text_rect = text.get_rect(center=(x, y))
+                self.screen.blit(text, text_rect)
 
         elif position.startswith('rect_'):
             color_map = {
@@ -1287,7 +1434,7 @@ class GameGUI:
             pos_data = self.game.board.positions.get(position)
             if pos_data:
                 # for mines, show count from board.mines; for hexes/center use positions[...] crystals
-                if pos_data.get('type') == 'mine':
+                if pos_data.get('type') == 'mine' or pos_data.get('type') == 'white_mine':
                     mine_color = self.game.board.get_mine_color_from_position(position)
                     if mine_color:
                         crystal_count = self.game.board.mines.get(mine_color, {}).get('crystals', 0)

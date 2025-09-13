@@ -51,7 +51,7 @@ class DiceAnimator:
         
         # Determine final results
         if dice_type == 'healing':
-            self.final_result = random.choice([1, 1, 1, 2, 2, 3])  # Healing springs die
+            self.final_result = random.choice([3, 2, 2, 1, 1, 1])  # White mine die (old healing springs values)
             self.final_results = [self.final_result, 0]
         elif dice_type == 'blood_magic':
             # Two independent dice for blood magic

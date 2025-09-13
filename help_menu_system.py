@@ -98,15 +98,15 @@ class HelpDialog:
                 "Last wizard standing wins the game!"
             ]),
             ("🗺️ BOARD LAYOUT", [
-                "• Center Circle (Healing Springs): Restore 1 health when you end your turn here",
+                "• Center Circle (White Mine): Contains 12 white crystals; successful mining teleports you to your choice of outer hex",
                 "• 4 Colored Rectangles: Starting positions for wizards (Red, Blue, Green, Yellow)",
-                "• 12 Outer Hexagons: Contain white crystals that can be mined",
+                "• 12 Outer Hexagons: Empty spaces for movement and positioning",
                 "• 4 Mines: Produce colored crystals matching nearby rectangle colors"
             ]),
             ("⚡ ACTIONS (3 per turn)", [
                 "• MOVE: Click the Move button, then click an adjacent connected space",
                 "• MINE: Click the Mine button, then click the space you're occupying",
-                "  (only works if your space has crystals or is a mine)",
+                "  (only works if your space is a mine with crystals available)",
                 "• CAST SPELL: Click a spell card from your hand, then click the target"
             ]),
             ("💎 RESOURCES", [

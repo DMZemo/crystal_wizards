@@ -151,29 +151,6 @@ class CrystalWizardsGame:
         # Log the move action
         self.action_log.append(f"{player.color.title()} Wizard moved to {target_position}.")
         return True
-        
-    def mine_white_crystal(self, player, position):
-        """Perform a mining action on a tile with a white crystal (no dice roll)."""
-        if not self.can_mine(player):
-            return False
-
-        pos_data = self.board.positions.get(position)
-        if pos_data and pos_data.get('type') == 'outer_hexagon' and pos_data.get('crystals', 0) > 0:
-            # Check if player can hold more crystals before removing from board
-            if not player.can_hold_more_crystals():
-                return "reserve_full"  # Return special value to indicate capacity issue
-
-            # remove crystal from canonical storage
-            self.board.positions[position]['crystals'] = max(0, self.board.positions[position].get('crystals', 0) - 1)
-            player.add_crystals('white', 1)
-
-            self.mines_used += 1
-            self.current_actions += 1
-
-            # Log the mining action
-            self.action_log.append(f"{player.color.title()} Wizard mined 1 white crystal.")
-            return True
-        return False
 
     def resolve_mine_with_roll(self, player, position, roll_result):
         """Resolve a mining action using a pre-determined dice roll from the GUI."""
@@ -185,9 +162,7 @@ class CrystalWizardsGame:
         if mine_result:
             crystals_gained, teleport_position = mine_result
 
-            # Log healing and crystal gains
-            if position == 'center':
-                self.action_log.append(f"{player.color.title()} healed for {roll_result} HP at the Springs.")
+            # Log crystal gains
             if crystals_gained:
                 for color, amount in crystals_gained.items():
                     self.action_log.append(f"{player.color.title()} mined {amount} {color} crystal(s).")
@@ -197,12 +172,15 @@ class CrystalWizardsGame:
                 player.add_crystals(color, amount)
 
             # Handle teleportation if applicable
-            if teleport_position:
+            if teleport_position and teleport_position != 'TELEPORT_CHOICE_NEEDED':
                 self.action_log.append(f"{player.color.title()} was teleported to {teleport_position}.")
                 old_location = player.location
                 self.board.remove_wizard_from_position(old_location, player)
                 player.location = teleport_position
                 self.board.add_wizard_to_position(teleport_position, player)
+            elif teleport_position == 'TELEPORT_CHOICE_NEEDED':
+                # Teleportation choice will be handled by GUI - crystals already given
+                self.action_log.append(f"{player.color.title()} mined from the White Mine! Choose teleportation destination.")
 
             self.mines_used += 1
             self.current_actions += 1
@@ -318,8 +296,13 @@ class CrystalWizardsGame:
                         self.action_log.append(f"Warning: {lost_crystals} {color} crystal(s) lost - mine at capacity!")
 
             elif color == 'white':
-                # Return white crystals to empty outer hex positions
-                self.return_white_crystals_to_spawn_points(amount, from_position)
+                # Return white crystals to center white mine
+                if 'white' in self.board.mines:
+                    self.board.mines['white']['crystals'] += amount
+                    
+                    # Trigger animation if GUI is available
+                    if hasattr(self, 'gui') and self.gui and from_position:
+                        self.gui.add_crystal_return_animation(from_position, 'center', 'white', amount)
     
     def return_white_crystals_to_spawn_points(self, amount, from_position=None):
         """

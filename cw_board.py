@@ -14,7 +14,7 @@ class NewBoardLayout:
 
     def __init__(self):
         # Board structure:
-        # - Center circle (healing springs)
+        # - Center circle (white mine)
         # - 4 rectangles at cardinal directions connected to center
         # - 12 outer hexagons in a ring
         # - 4 mines outside the ring at cardinal directions
@@ -30,12 +30,12 @@ class NewBoardLayout:
 
     def create_positions(self):
         """Create all board positions with new structure"""
-        # Center circle (healing springs)
+        # Center circle (white mine)
         self.positions['center'] = {
-            'type': 'healing_springs',
+            'type': 'white_mine',
             'color': 'white',
             'shape': 'circle',
-            'crystals': 0
+            'crystals': 12  # Starting crystals for white mine
         }
 
         # 4 rectangles (North=Green, South=Yellow, East=Red, West=Blue)
@@ -60,8 +60,8 @@ class NewBoardLayout:
                 'type': 'outer_hexagon',
                 'color': 'grey',
                 'shape': 'hexagon',
-                # hex tiles start with 1 white crystal
-                'crystals': 1,
+                # hex tiles now start empty, all white crystals are at center mine
+                'crystals': 0,
                 'ring_position': i
             }
 
@@ -162,7 +162,8 @@ class GameBoard:
             'yellow': {'crystals': 9, 'position': 'mine_north'},
             'green': {'crystals': 9, 'position': 'mine_south'},
             'red': {'crystals': 9, 'position': 'mine_west'},
-            'blue': {'crystals': 9, 'position': 'mine_east'}
+            'blue': {'crystals': 9, 'position': 'mine_east'},
+            'white': {'crystals': 12, 'position': 'center'}
         }
         self.colored_rectangles = {
             'red': 'rect_east',
@@ -198,20 +199,16 @@ class GameBoard:
                 self.positions[pos]['crystals'] = self.positions[pos].get('crystals', 0)
 
     def place_initial_crystals(self):
-        # outer hexes start with 1 white crystal (already set in layout), ensure it's present
+        # All white crystals now start at the center white mine (12 crystals)
+        # Hex tiles no longer start with white crystals
         for i in range(12):
             hex_id = f'hex_{i}'
             if hex_id in self.positions:
-                self.positions[hex_id]['crystals'] = 1
+                self.positions[hex_id]['crystals'] = 0
 
     def add_white_crystals_to_empty_tiles(self, amount):
-        empty_tiles = [pos for pos, data in self.positions.items()
-                       if data.get('type') == 'outer_hexagon' and data.get('crystals', 0) == 0]
-        for _ in range(amount):
-            if empty_tiles:
-                tile = random.choice(empty_tiles)
-                self.positions[tile]['crystals'] = 1
-                empty_tiles.remove(tile)
+        # No longer adding white crystals to hex tiles - all white crystals are at center mine
+        pass
 
     def get_all_positions(self):
         return list(self.positions.keys())
@@ -235,11 +232,8 @@ class GameBoard:
             pos_data = self.positions[position]
             if pos_data.get('type') == 'outer_hexagon' and pos_data.get('crystals', 0) > 0:
                 return True
-            if pos_data.get('type') == 'healing_springs':
-                # center is a special case (treat as having heal crystals)
-                return True
-        # Check mines
-        if position.startswith('mine_'):
+        # Check mines (including center white mine)
+        if position.startswith('mine_') or position == 'center':
             mine_color = self.get_mine_color_from_position(position)
             if mine_color and self.mines[mine_color]['crystals'] > 0:
                 return True
@@ -250,15 +244,13 @@ class GameBoard:
             'mine_north': 'yellow',
             'mine_south': 'green',
             'mine_west': 'red',
-            'mine_east': 'blue'
+            'mine_east': 'blue',
+            'center': 'white'
         }.get(mine_position)
 
     def resolve_mine_with_roll(self, position, wizard, mine_roll):
         # position provided may be 'center', 'mine_x' or hex
-        if position == 'center':
-            wizard.heal(mine_roll)
-            return ({}, random.choice(self.layout.get_outer_ring_positions()))
-        elif position.startswith('mine_'):
+        if position == 'center' or position.startswith('mine_'):
             mine_color = self.get_mine_color_from_position(position)
             if not mine_color or self.mines[mine_color]['crystals'] <= 0:
                 return None
@@ -270,8 +262,15 @@ class GameBoard:
 
                 # Only remove the crystals that will actually be given to the player
                 self.mines[mine_color]['crystals'] -= crystals_to_give
-                return ({mine_color: crystals_to_give},
-                        self.colored_rectangles[mine_color] if crystals_to_give > 0 else None)
+                
+                # Handle teleportation for successful mining
+                if position == 'center':
+                    # White mine teleports to chosen hex position - choice will be handled by GUI
+                    return ({mine_color: crystals_to_give}, 'TELEPORT_CHOICE_NEEDED')
+                else:
+                    # Colored mines teleport to their matching rectangle
+                    return ({mine_color: crystals_to_give},
+                            self.colored_rectangles[mine_color] if crystals_to_give > 0 else None)
         elif position in self.positions and self.positions[position].get('type') == 'outer_hexagon' and self.positions[position].get('crystals', 0) > 0:
             # Remove the white crystal from the hex tile and return it
             self.positions[position]['crystals'] = max(0, self.positions[position].get('crystals', 0) - 1)
@@ -294,7 +293,7 @@ class GameBoard:
 
     # helper to get crystal count at any position (white or colored mines)
     def get_crystals_at_position(self, position):
-        if position.startswith('mine_'):
+        if position.startswith('mine_') or position == 'center':
             mine_color = self.get_mine_color_from_position(position)
             return self.mines[mine_color]['crystals'] if mine_color else 0
         if position in self.positions:
@@ -305,15 +304,17 @@ class GameBoard:
         """Check if two positions are adjacent"""
         return self.layout.is_adjacent(pos1, pos2)
     
+    def is_empty_space(self, position):
+        """Check if a position is an empty space (no longer any empty spaces on board)"""
+        return False
+    
     def is_healing_springs(self, position):
-        """Check if a position is a healing springs (center position)"""
-        if position in self.positions:
-            return self.positions[position].get('type') == 'healing_springs'
+        """Check if a position is healing springs (no longer any healing springs on board)"""
         return False
     
     def is_mine(self, position):
         """Check if a position is a mine"""
-        return position.startswith('mine_')
+        return position.startswith('mine_') or position == 'center'
     
     def get_wizard_at_position(self, position):
         """Get list of wizards at a specific position"""

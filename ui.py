@@ -92,6 +92,11 @@ class HighlightManager:
         """Set positions to highlight for casting spells"""
         self.highlighted_positions = set(positions)
         self.highlight_type = 'cast'
+    
+    def set_teleport_highlights(self, positions):
+        """Set positions to highlight for teleportation choice"""
+        self.highlighted_positions = set(positions)
+        self.highlight_type = 'teleport'
         
     def is_highlighted(self, position):
         """Check if a position is highlighted"""
@@ -114,6 +119,9 @@ class HighlightManager:
             elif self.highlight_type == 'cast':
                 # Red highlight for casting spells
                 pygame.draw.circle(highlight_surface, (255, 0, 0, 100), (radius, radius), radius)
+            elif self.highlight_type == 'teleport':
+                # Purple highlight for teleportation choice
+                pygame.draw.circle(highlight_surface, (255, 0, 255, 100), (radius, radius), radius)
             else:
                 # Default yellow highlight
                 pygame.draw.circle(highlight_surface, (255, 255, 0, 100), (radius, radius), radius)
@@ -189,12 +197,6 @@ class ActionPanel:
             "Cast Spell", font, normal_color=(200, 100, 100)
         )
         
-        self.blood_magic_button = Button(
-            x + self.button_width + self.button_spacing, button_row_2_y,
-            self.button_width, self.button_height,
-            "Blood Magic", font, normal_color=(150, 50, 150)
-        )
-        
         # Third row
         button_row_3_y = button_row_2_y + self.button_height + self.button_spacing
         
@@ -212,8 +214,7 @@ class ActionPanel:
         )
         self.ai_failsafe_button.enabled = False  # Hidden by default
 
-        self.buttons = [self.move_button, self.mine_button, self.cast_button, 
-                       self.blood_magic_button, self.end_turn_button]
+        self.buttons = [self.move_button, self.mine_button, self.cast_button, self.end_turn_button]
         self.selected_action = None
         
     def handle_event(self, event, game):
@@ -224,13 +225,6 @@ class ActionPanel:
         self.move_button.enabled = game.can_move(current_player)
         self.mine_button.enabled = game.can_mine(current_player)
         self.cast_button.enabled = game.can_cast_spell(current_player)
-        
-        # Blood Magic is enabled if player has health > 1 and has laid down cards
-        self.blood_magic_button.enabled = (
-            current_player.health > 1 and 
-            len(current_player.cards_laid_down) > 0 and
-            game.can_mine(current_player)
-        )
         
         self.end_turn_button.enabled = True
         
@@ -246,11 +240,7 @@ class ActionPanel:
         if self.cast_button.handle_event(event):
             self.selected_action = 'cast' if self.selected_action != 'cast' else None
             return 'cast_selected'
-            
-        if self.blood_magic_button.handle_event(event):
-            self.selected_action = 'blood_magic' if self.selected_action != 'blood_magic' else None
-            return 'blood_magic_selected'
-        
+    
         if self.end_turn_button.handle_event(event):
             self.selected_action = None
             return 'end_turn'
@@ -273,8 +263,6 @@ class ActionPanel:
             pygame.draw.rect(screen, (0, 0, 255), self.mine_button.rect, 3)
         elif self.selected_action == 'cast':
             pygame.draw.rect(screen, (255, 0, 0), self.cast_button.rect, 3)
-        elif self.selected_action == 'blood_magic':
-            pygame.draw.rect(screen, (150, 50, 150), self.blood_magic_button.rect, 3)
 
     def handle_ai_event(self, event):
         """Handle AI-related events and return action if failsafe is triggered"""
