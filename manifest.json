@@ -1,0 +1,66 @@
+
+{
+  "red_wizard": {
+    "path": "assets/sprites/red_wizard.png",
+    "type": "wizard",
+    "size": [64, 64],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "blue_wizard": {
+    "path": "assets/sprites/blue_wizard.png",
+    "type": "wizard",
+    "size": [64, 64],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "green_wizard": {
+    "path": "assets/sprites/green_wizard.png",
+    "type": "wizard",
+    "size": [64, 64],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "yellow_wizard": {
+    "path": "assets/sprites/yellow_wizard.png",
+    "type": "wizard",
+    "size": [64, 64],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "red_crystal": {
+    "path": "assets/sprites/red_crystal.png",
+    "type": "crystal",
+    "size": [32, 32],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "blue_crystal": {
+    "path": "assets/sprites/blue_crystal.png",
+    "type": "crystal",
+    "size": [32, 32],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "green_crystal": {
+    "path": "assets/sprites/green_crystal.png",
+    "type": "crystal",
+    "size": [32, 32],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "yellow_crystal": {
+    "path": "assets/sprites/yellow_crystal.png",
+    "type": "crystal",
+    "size": [32, 32],
+    "frames": 1,
+    "animation_speed": 100
+  },
+  "white_crystal": {
+    "path": "assets/sprites/white_crystal.png",
+    "type": "crystal",
+    "size": [32, 32],
+    "frames": 1,
+    "animation_speed": 100
+  }
+}

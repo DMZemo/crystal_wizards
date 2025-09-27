@@ -6,6 +6,8 @@ This file initializes the game, handles the main loop, and manages the game GUI.
 
 """
 
+# pyinstaller --onefile --noconsole --add-data "sounds;sounds" --add_data "assets;assets" crystal_wizards.py
+
 import pygame
 import sys
 from cw_game import CrystalWizardsGame

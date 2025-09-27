@@ -146,6 +146,13 @@ class Wizard:
         
         # Apply the final damage
         self.health = max(0, self.health - actual_damage)
+        
+        # Create visual effects for damage taken
+        if gui and hasattr(gui, 'position_coords') and self.location in gui.position_coords:
+            from particle_system import particle_system
+            x, y = gui.position_coords[self.location]
+            if actual_damage > 0:
+                particle_system.create_combat_hit_effect(x, y, actual_damage)
 
     def _calculate_ai_blocking_amount(self, damage, game, attacker=None):
         """Calculate how many crystals AI should use for blocking based on difficulty"""
@@ -231,12 +238,14 @@ class AIWizard(Wizard):
         self.ai_controller = ai_controller
         
     def execute_turn(self, game):
-        """Execute the AI's turn using the strategic AI controller"""
+        """Execute the AI's turn using the strategic AI controller ONLY"""
         if self.ai_controller:
+            # Use the strategic AI controller exclusively
             self.ai_controller.execute_turn(game)
         else:
-            # Fallback to basic behavior if no controller is set
-            self._basic_ai_turn(game)
+            # Emergency fallback - just end the turn if no controller
+            print(f"WARNING: AI {self.color} has no controller, ending turn")
+            game.current_actions = game.max_actions_per_turn
     
     def _basic_ai_turn(self, game):
         """Basic AI behavior as fallback"""
@@ -386,32 +395,34 @@ class SpellCardDeck:
     
     def initialize_deck(self):
         """Create the standard spell card deck with wild instead of white"""
-        # 32 spell cards total
+        # 24 spell cards total
         
-        # 2-damage spells (cost 2: 1 color + 1 wildcard)
-        for _ in range(2):  # 2 cards of each color
+        # 2-damage spells (cost 2: 1 color + 1 wildcard) 8 cards
+        for _ in range(2):  # 2 cards of each color:
             self.cards.append(SpellCard({'red': 1, 'wild': 1}))
             self.cards.append(SpellCard({'blue': 1, 'wild': 1}))
             self.cards.append(SpellCard({'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'yellow': 1, 'wild': 1}))
 
-        # 3-damage spells (cost 3: 2 colors + 1 wildcard)
+        # 3-damage spells (cost 3: 2 colors + 1 wildcard) 8 Cards
         for _ in range(2): # 2 cards of each color combination
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'wild': 1}))
+            self.cards.append(SpellCard({'green': 1, 'yellow': 1, 'wild': 1}))
+
+        for _ in range(1): # 1 card of each color combination
             self.cards.append(SpellCard({'red': 1, 'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'yellow': 1, 'wild': 1}))
             self.cards.append(SpellCard({'blue': 1, 'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'blue': 1, 'yellow': 1, 'wild': 1}))
-            self.cards.append(SpellCard({'green': 1, 'yellow': 1, 'wild': 1}))
-
-        # 4-damage spells (cost 4: 3 colors + 1 wildcard)
-        for _ in range(2): # 2 card of each color combination
+            
+        # 4-damage spells (cost 4: 3 colors + 1 wildcard) 4 Cards
+        for _ in range(1): # 1 card of each color combination
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'green': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'yellow': 1, 'wild': 1}))
             self.cards.append(SpellCard({'red': 1, 'green': 1, 'yellow': 1, 'wild': 1}))
             self.cards.append(SpellCard({'blue': 1, 'green': 1, 'yellow': 1, 'wild': 1}))
 
-        # 5-damage spells (cost 5: all 4 colors + 1 wildcard)
+        # 5-damage spells (cost 5: all 4 colors + 1 wildcard) 4 Cards
         for _ in range(4): # 4 cards of each color combination
             self.cards.append(SpellCard({'red': 1, 'blue': 1, 'green': 1, 'yellow': 1, 'wild': 1}))
 

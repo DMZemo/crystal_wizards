@@ -152,6 +152,26 @@ class CrystalWizardsGame:
         self.action_log.append(f"{player.color.title()} Wizard moved to {target_position}.")
         return True
 
+    def mine_white_crystal(self, player, position):
+        """Mine a white crystal at the specified position"""
+        if not self.can_mine(player):
+            return False
+            
+        # Check if there are white crystals at this position
+        if position in self.board.positions and self.board.positions[position].get('crystals', 0) > 0:
+            # Remove one white crystal from the hex tile
+            self.board.positions[position]['crystals'] -= 1
+            
+            # Add white crystal to player if they have space
+            if player.can_hold_more_crystals():
+                player.add_crystals('white', 1)
+                self.mines_used += 1
+                self.current_actions += 1
+                self.action_log.append(f"{player.color.title()} mined 1 white crystal from {position}.")
+                return True
+        
+        return False
+
     def resolve_mine_with_roll(self, player, position, roll_result):
         """Resolve a mining action using a pre-determined dice roll from the GUI."""
         if not self.can_mine(player):

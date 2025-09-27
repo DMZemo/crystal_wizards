@@ -54,8 +54,8 @@ class NewBoardLayout:
                 'direction': config['direction']
             }
 
-        # 12 outer hexagons
-        for i in range(12):
+        # 8 outer hexagons
+        for i in range(8):
             self.positions[f'hex_{i}'] = {
                 'type': 'outer_hexagon',
                 'color': 'grey',
@@ -87,29 +87,29 @@ class NewBoardLayout:
         self.connections['center'] = ['rect_north', 'rect_south', 'rect_east', 'rect_west']
 
         rect_to_hex = {
-            'rect_north': [8, 9, 10],
-            'rect_east': [11, 0, 1],
-            'rect_south': [2, 3, 4],
-            'rect_west': [5, 6, 7]
+            'rect_north': [6],
+            'rect_east': [0],
+            'rect_south': [2],
+            'rect_west': [4]
         }
 
         for rect_id, hex_indices in rect_to_hex.items():
             self.connections[rect_id] = ['center'] + [f'hex_{i}' for i in hex_indices]
 
-        for i in range(12):
+        for i in range(8):
             hex_id = f'hex_{i}'
-            prev_hex = f'hex_{(i - 1) % 12}'
-            next_hex = f'hex_{(i + 1) % 12}'
+            prev_hex = f'hex_{(i - 1) % 8}'
+            next_hex = f'hex_{(i + 1) % 8}'
             self.connections[hex_id] = [prev_hex, next_hex]
             for rect_id, hex_indices in rect_to_hex.items():
                 if i in hex_indices:
                     self.connections[hex_id].append(rect_id)
 
         mine_to_hex = {
-            'mine_north': [9],
+            'mine_north': [6],
             'mine_east': [0],
-            'mine_south': [3],
-            'mine_west': [6]
+            'mine_south': [2],
+            'mine_west': [4]
         }
         for mine_id, hex_indices in mine_to_hex.items():
             self.connections[mine_id] = [f'hex_{i}' for i in hex_indices]
@@ -130,8 +130,8 @@ class NewBoardLayout:
         })
 
         hex_distance = 150
-        for i in range(12):
-            angle_rad = math.radians(i * 30)
+        for i in range(8):
+            angle_rad = math.radians(i * 45)
             x = center_x + hex_distance * math.cos(angle_rad)
             y = center_y + hex_distance * math.sin(angle_rad)
             self.position_coordinates[f'hex_{i}'] = (int(x), int(y))
@@ -145,7 +145,7 @@ class NewBoardLayout:
         })
 
     def get_outer_ring_positions(self):
-        return [f'hex_{i}' for i in range(12)]
+        return [f'hex_{i}' for i in range(8)]
 
     def get_connections(self, position):
         return self.connections.get(position, [])
@@ -201,7 +201,7 @@ class GameBoard:
     def place_initial_crystals(self):
         # All white crystals now start at the center white mine (12 crystals)
         # Hex tiles no longer start with white crystals
-        for i in range(12):
+        for i in range(8):
             hex_id = f'hex_{i}'
             if hex_id in self.positions:
                 self.positions[hex_id]['crystals'] = 0

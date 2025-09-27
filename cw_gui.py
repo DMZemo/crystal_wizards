@@ -1,9 +1,8 @@
 """
-Crystal Wizards - Pygame GUI Implementation (Fixed Indentation + Player Names)
+Crystal Wizards - Enhanced Pygame GUI Implementation
 
-This version fixes indentation and updates UI labels to show player-provided
-usernames from the start screen when available, falling back to color-based
-names otherwise. It also adds a quit confirmation dialog on Esc or window close.
+Enhanced version with improved graphics, animations, particle effects, and visual polish.
+Features wizard sprites, smooth movement animations, spell effects, and enhanced UI.
 """
 
 import math
@@ -20,6 +19,10 @@ from dice_animation import DiceRollManager
 from blood_magic_choice_dialog import BloodMagicChoiceDialog
 from blood_magic_dialog import BloodMagicDialog
 from help_menu_system import PauseMenuDialog
+from particle_system import particle_system
+from sprite_manager import sprite_manager
+from animation_system import animation_manager
+from ai_animation_config import *
 
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -461,8 +464,12 @@ class GameGUI:
         
         # AI turn timing variables for non-blocking behavior
         self.ai_turn_start_time = 0
-        self.ai_thinking_delay = 1000  # 1000ms delay before AI acts
+        self.ai_thinking_delay = AI_THINKING_DELAY  # Configurable delay before AI acts
         self.ai_turn_executed = False
+        self.ai_action_delay = AI_ACTION_DELAY  # Configurable delay between AI actions
+        self.ai_last_action_time = 0
+        self.ai_actions_queue = []
+        self.ai_current_action_index = 0
 
         self.position_coords = {}
         self.calculate_position_coordinates()
@@ -479,6 +486,11 @@ class GameGUI:
         self.hovered_card_index = None
         self.selected_card_index = None
         self.mouse_pos = (0, 0)
+        
+        # Enhanced visual systems
+        self.last_frame_time = pygame.time.get_ticks()
+        self.glow_effects = {}  # Track glowing elements
+        self.ui_animations = {}  # Track UI animations
 
     
         # Blood Magic dialogs
@@ -693,8 +705,8 @@ class GameGUI:
             'rect_west': (self.board_center_x - self.rect_distance, self.board_center_y)
         })
 
-        for i in range(12):
-            angle_rad = math.radians(i * 30)
+        for i in range(8):
+            angle_rad = math.radians(i * 45)
             x = self.board_center_x + self.outer_distance * math.cos(angle_rad)
             y = self.board_center_y + self.outer_distance * math.sin(angle_rad)
             self.position_coords[f'hex_{i}'] = (int(x), int(y))
@@ -708,13 +720,21 @@ class GameGUI:
 
     # ---- Main loop and events ----
     def run(self):
-        """Main game loop"""
+        """Main game loop with enhanced visual systems"""
         clock = pygame.time.Clock()
         running = True
 
         self.game.initialize_game()
 
         while running:
+            # Calculate delta time for smooth animations
+            current_time = pygame.time.get_ticks()
+            dt = (current_time - self.last_frame_time) / 1000.0  # Convert to seconds
+            self.last_frame_time = current_time
+            
+            # Update visual systems
+            particle_system.update(dt)
+            animation_manager.update(dt)
             if not self.is_dice_rolling:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -787,21 +807,12 @@ class GameGUI:
                 if self.ai_turn_start_time == 0:
                     self.ai_turn_start_time = current_time
                     self.ai_turn_executed = False
+                    self.ai_actions_queue = []
+                    self.ai_current_action_index = 0
+                    self.ai_last_action_time = 0
                 
-                # Check if enough time has passed and we haven't executed yet
- 
-                if not self.ai_turn_executed and (current_time - self.ai_turn_start_time) >= self.ai_thinking_delay:
-                    self.game.execute_ai_turn(current_player)
-                    self.ai_turn_executed = True
-                    
-                    if self.game.current_actions >= self.game.max_actions_per_turn:
-                        self.game.end_turn()
-                        # Update button visibility for the new current player
-                        new_current_player = self.game.get_current_player()
-                        self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
-                        # Reset for next turn
-                        self.ai_turn_start_time = 0
-                        self.ai_turn_executed = False
+                # Process AI turn with animated actions
+                self._process_ai_turn_with_animations(current_player, current_time)
             else:
                 # Reset AI turn timer if not an AI turn
                 self.ai_turn_start_time = 0
@@ -907,6 +918,33 @@ class GameGUI:
         if self.current_action_mode == 'cast':
             if self.highlight_manager.is_highlighted(position):
                 if self.selected_spell_card:
+                    # Create spell casting visual effects
+                    caster_pos = current_player.location
+                    if caster_pos in self.position_coords:
+                        caster_x, caster_y = self.position_coords[caster_pos]
+                        
+                        # Determine spell color based on crystals used
+                        spell_colors = []
+                        for color, count in self.selected_spell_card.original_crystals_used.items():
+                            if count > 0:
+                                spell_colors.extend([color] * count)
+                        
+                        primary_color = spell_colors[0] if spell_colors else 'white'
+                        
+                        # Create casting effect at caster position
+                        particle_system.create_spell_cast_effect(caster_x, caster_y, primary_color, 30)
+                        
+                        # Create spell trail to all targets
+                        adjacent_positions = self.game.board.get_adjacent_positions(caster_pos)
+                        for target_pos in adjacent_positions:
+                            if target_pos in self.position_coords:
+                                target_x, target_y = self.position_coords[target_pos]
+                                wizards_at_pos = self.game.board.get_wizard_at_position(target_pos)
+                                if wizards_at_pos and any(w != current_player for w in wizards_at_pos):
+                                    particle_system.create_spell_trail_effect(
+                                        caster_x, caster_y, target_x, target_y, primary_color
+                                    )
+                    
                     if self.game.cast_spell(current_player, self.selected_spell_card, self):
                         self.sound_manager.play_sound('spell_cast', 0.8)
                         self.current_action_mode = None
@@ -918,6 +956,14 @@ class GameGUI:
 
         if self.current_action_mode == 'move':
             if self.highlight_manager.is_highlighted(position):
+                # Create movement animation
+                old_location = current_player.location
+                if old_location in self.position_coords and position in self.position_coords:
+                    old_x, old_y = self.position_coords[old_location]
+                    new_x, new_y = self.position_coords[position]
+                    wizard_id = f"{current_player.color}_{id(current_player)}"
+                    animation_manager.start_wizard_movement(wizard_id, (old_x, old_y), (new_x, new_y), 0.5)
+                
                 if self.game.move_player(current_player, position):
                     self.sound_manager.play_move()
                     self.current_action_mode = None
@@ -945,15 +991,34 @@ class GameGUI:
 
 
     def initiate_mine_sequence(self, player, position):
-        """Starts the dice rolling animation for a mining action."""
+        """Starts the dice rolling animation for a mining action with visual effects."""
         if not self.game.can_mine(player):
             return
+
+        # Create mining visual effects
+        if position in self.position_coords:
+            mine_x, mine_y = self.position_coords[position]
+            
+            # Determine crystal color being mined
+            crystal_color = 'white'  # Default for white crystals
+            if self.game.board.is_mine(position):
+                mine_color = self.game.board.get_mine_color_from_position(position)
+                if mine_color and mine_color != 'white':
+                    crystal_color = mine_color
+            
+            # Create mining particle effect
+            particle_system.create_mining_effect(mine_x, mine_y, crystal_color)
 
         if position in self.game.board.white_crystals and self.game.board.white_crystals[position] > 0:
             result = self.game.mine_white_crystal(player, position)
             if result == "reserve_full":
                 self.show_reserve_full_warning()
             elif result:
+                # Create crystal pickup effect
+                if position in self.position_coords:
+                    mine_x, mine_y = self.position_coords[position]
+                    particle_system.create_crystal_pickup_effect(mine_x, mine_y, 'white')
+                
                 self.sound_manager.play_mine()
                 self.current_action_mode = None
                 self.highlight_manager.clear_highlights()
@@ -1000,6 +1065,20 @@ class GameGUI:
         if success == "reserve_full":
             self.show_reserve_full_warning()
         elif success:
+            # Create success visual effects
+            if position in self.position_coords:
+                mine_x, mine_y = self.position_coords[position]
+                
+                # Determine what was mined
+                if self.game.board.is_mine(position):
+                    mine_color = self.game.board.get_mine_color_from_position(position)
+                    crystal_color = mine_color if mine_color else 'white'
+                else:
+                    crystal_color = 'white'
+                
+                # Create crystal pickup effect
+                particle_system.create_crystal_pickup_effect(mine_x, mine_y, crystal_color)
+            
             if player.health > old_health:
                 self.sound_manager.play_heal()
             if player.location != old_location:
@@ -1114,8 +1193,23 @@ class GameGUI:
         return best_position if best_position else random.choice(available_positions)
 
     def complete_teleportation(self, player, target_position):
-        """Complete the teleportation after player choice."""
+        """Complete the teleportation after player choice with animation."""
         old_location = player.location
+        
+        # Create teleportation visual effects
+        if old_location in self.position_coords:
+            old_x, old_y = self.position_coords[old_location]
+            particle_system.create_spell_cast_effect(old_x, old_y, 'wild', 25)
+            
+        if target_position in self.position_coords:
+            new_x, new_y = self.position_coords[target_position]
+            particle_system.create_spell_cast_effect(new_x, new_y, 'wild', 25)
+            
+            # Create movement animation
+            wizard_id = f"{player.color}_{id(player)}"
+            if old_location in self.position_coords:
+                old_x, old_y = self.position_coords[old_location]
+                animation_manager.start_wizard_movement(wizard_id, (old_x, old_y), (new_x, new_y), 0.8)
         
         # Perform the teleportation
         self.game.board.remove_wizard_from_position(old_location, player)
@@ -1309,7 +1403,16 @@ class GameGUI:
 
     # ---- Drawing ----
     def draw(self):
-        """Draw the entire game state"""
+        """Draw the entire game state with enhanced visual effects"""
+        # Apply screen shake offset
+        shake_x, shake_y = particle_system.get_screen_offset()
+        
+        # Create a temporary surface for shake effect
+        if shake_x != 0 or shake_y != 0:
+            temp_surface = pygame.Surface((self.screen_width, self.screen_height))
+            original_screen = self.screen
+            self.screen = temp_surface
+        
         # Draw background image first
         if hasattr(self, 'bg_scaled') and self.bg_scaled:
             self.screen.blit(self.bg_scaled, (0, 0))
@@ -1326,7 +1429,17 @@ class GameGUI:
         self.draw_board()
         self.draw_attack_animations()
         self.draw_crystal_return_animations()
+        
+        # Draw particle effects
+        particle_system.draw(self.screen)
+        
         self.draw_ui()
+        
+        # Apply screen shake if needed
+        if shake_x != 0 or shake_y != 0:
+            original_screen.fill((0, 0, 0))  # Clear with black
+            original_screen.blit(temp_surface, (int(shake_x), int(shake_y)))
+            self.screen = original_screen
         
         # Draw AI failsafe button during AI turns
         current_player = self.game.get_current_player()
@@ -1441,15 +1554,34 @@ class GameGUI:
                 else:
                     crystal_count = pos_data.get('crystals', 0)
 
-            # Draw crystal indicator if crystals exist
+            # Draw crystal indicator if crystals exist with enhanced visuals
             if crystal_count > 0:
-                # Example: draw a small circle or stack to indicate crystals
-                pygame.draw.circle(self.screen, (255, 255, 255), coords, 10)  # white crystal indicator
-                # optionally draw count text
+                # Create a glowing crystal effect
+                current_time = pygame.time.get_ticks()
+                pulse = 0.8 + 0.2 * abs(math.sin(current_time * 0.003))
+                
+                # Draw multiple layers for glow effect
+                for i in range(3):
+                    alpha = int(80 * pulse * (1 - i * 0.3))
+                    radius = int(12 + i * 2)
+                    glow_surface = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(glow_surface, (255, 255, 255, alpha), (radius, radius), radius)
+                    self.screen.blit(glow_surface, (coords[0] - radius, coords[1] - radius))
+                
+                # Draw main crystal
+                pygame.draw.circle(self.screen, (255, 255, 255), coords, 10)
+                pygame.draw.circle(self.screen, (200, 200, 255), coords, 8)
+                
+                # Draw count text with better visibility
                 if crystal_count > 1:
                     font = self.font_small
                     text = font.render(str(crystal_count), True, (0, 0, 0))
-                    text_rect = text.get_rect(center=(coords[0], coords[1]))
+                    # Add text outline for better visibility
+                    outline_text = font.render(str(crystal_count), True, (255, 255, 255))
+                    for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                        outline_rect = outline_text.get_rect(center=(coords[0] + dx, coords[1] + dy))
+                        self.screen.blit(outline_text, outline_rect)
+                    text_rect = text.get_rect(center=coords)
                     self.screen.blit(text, text_rect)
 
         elif position.startswith('mine_'):
@@ -1460,13 +1592,40 @@ class GameGUI:
                 'mine_east': COLORS['blue']
             }
             color = color_map.get(position, COLORS['grey'])
+            
+            # Enhanced mine drawing with glow effect
+            current_time = pygame.time.get_ticks()
+            pulse = 0.9 + 0.1 * abs(math.sin(current_time * 0.002))
+            
+            # Draw glow layers
+            for i in range(3):
+                alpha = int(60 * pulse * (1 - i * 0.4))
+                radius = int(32 + i * 3)
+                glow_surface = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+                glow_color = (*color[:3], alpha)
+                pygame.draw.circle(glow_surface, glow_color, (radius, radius), radius)
+                self.screen.blit(glow_surface, (x - radius, y - radius))
+            
+            # Draw main mine circle
             pygame.draw.circle(self.screen, color, (x, y), 30)
             pygame.draw.circle(self.screen, COLORS['black'], (x, y), 30, 4)
+            
+            # Add inner highlight for depth
+            highlight_color = tuple(min(255, c + 50) for c in color[:3])
+            pygame.draw.circle(self.screen, highlight_color, (x - 8, y - 8), 12)
 
             mine_color = self.game.board.get_mine_color_from_position(position)
             if mine_color:
                 crystal_count = self.game.board.mines[mine_color]['crystals']
+                # Enhanced text with outline
                 text = self.font_large.render(str(crystal_count), True, COLORS['white'])
+                outline_text = self.font_large.render(str(crystal_count), True, COLORS['black'])
+                
+                # Draw text outline
+                for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                    outline_rect = outline_text.get_rect(center=(x + dx, y + dy))
+                    self.screen.blit(outline_text, outline_rect)
+                
                 text_rect = text.get_rect(center=(x, y))
                 self.screen.blit(text, text_rect)
 
@@ -1496,40 +1655,186 @@ class GameGUI:
         pygame.draw.polygon(self.screen, border_color, points, 2)
 
     def draw_wizards(self):
-        """Draw wizard pieces on the board"""
-        position_wizards = {}
-        for position, data in self.game.board.wizards_on_board.items():
-            position_wizards[position] = data if isinstance(data, list) else [data]
+        """Draw wizard pieces on the board with sprites and animations - ROBUST VERSION"""
+        try:
+            # Validate that we have the necessary game state
+            if not self.game or not self.game.board:
+                return
+                
+            # STEP 1: Safely collect wizard data with extensive validation
+            position_wizards = {}
+            
+            # Get a safe copy of wizards_on_board to avoid issues with concurrent modification
+            try:
+                wizards_data = dict(self.game.board.wizards_on_board)
+            except (AttributeError, RuntimeError):
+                # If we can't safely get the data, skip this frame
+                return
+            
+            # Process each position's wizard data
+            for position, data in wizards_data.items():
+                # Skip invalid positions
+                if not position or position not in self.position_coords:
+                    continue
+                    
+                # Validate wizard data
+                if not data:
+                    continue
+                    
+                # Handle both list and single wizard formats
+                try:
+                    if isinstance(data, list):
+                        # Filter out None/invalid wizards
+                        valid_wizards = [w for w in data if w is not None and hasattr(w, 'color') and hasattr(w, 'location')]
+                        if valid_wizards:
+                            position_wizards[position] = valid_wizards
+                    else:
+                        # Single wizard - validate it
+                        if data is not None and hasattr(data, 'color') and hasattr(data, 'location'):
+                            position_wizards[position] = [data]
+                except (AttributeError, TypeError):
+                    # Skip corrupted wizard data
+                    continue
 
-        for position, wizards in position_wizards.items():
-            if position in self.position_coords:
-                x, y = self.position_coords[position]
-                count = len(wizards)
-                offsets = [(0, -5)] if count == 1 else [(-16, -5), (16, -5)] if count == 2 else []
-                if count > 2:
-                    radius = 20
-                    for i in range(count):
-                        angle = math.radians(i * (360 / count))
-                        offsets.append((int(radius * math.cos(angle)), int(radius * math.sin(angle)) - 5))
+            # STEP 2: Draw wizards with duplicate prevention and error handling
+            processed_wizards = set()
+            
+            for position, wizards in position_wizards.items():
+                try:
+                    # Get position coordinates
+                    x, y = self.position_coords[position]
+                    count = len(wizards)
+                    
+                    # Calculate offsets for multiple wizards at same position
+                    if count == 1:
+                        offsets = [(0, -5)]
+                    elif count == 2:
+                        offsets = [(-16, -5), (16, -5)]
+                    else:
+                        # For 3+ wizards, arrange in a circle
+                        offsets = []
+                        radius = min(20, max(12, count * 3))  # Adaptive radius
+                        for i in range(count):
+                            angle = math.radians(i * (360 / count))
+                            offset_x = int(radius * math.cos(angle))
+                            offset_y = int(radius * math.sin(angle)) - 5
+                            offsets.append((offset_x, offset_y))
 
-                for i, wizard in enumerate(wizards):
-                    wx, wy = x + offsets[i][0], y + offsets[i][1]
-                    color = COLORS.get(getattr(wizard, 'color', 'black'), COLORS['black'])
-
-                    # Optional pulsing highlight
-                    if getattr(wizard, 'is_blocking_highlighted', False):
-                        current_time = pygame.time.get_ticks()
-                        pulse_alpha = int(100 + 100 * abs(math.sin(current_time * 0.01)))
-                        highlight_color = (*COLORS['gold'][:3], pulse_alpha)
-                        highlight_surface = pygame.Surface((30, 30), pygame.SRCALPHA)
-                        pygame.draw.circle(highlight_surface, highlight_color, (15, 15), 18)
-                        self.screen.blit(highlight_surface, (wx - 15, wy - 15))
-
-                    pygame.draw.circle(self.screen, color, (wx, wy), 12)
-                    pygame.draw.circle(self.screen, COLORS['black'], (wx, wy), 12, 2)
-                    text = self.font_small.render("W", True, COLORS['white'])
-                    text_rect = text.get_rect(center=(wx, wy))
-                    self.screen.blit(text, text_rect)
+                    # Draw each wizard at this position
+                    for i, wizard in enumerate(wizards):
+                        try:
+                            # Validate wizard object
+                            if not wizard or not hasattr(wizard, 'color'):
+                                continue
+                                
+                            wizard_obj_id = id(wizard)
+                            
+                            # Prevent duplicate rendering
+                            if wizard_obj_id in processed_wizards:
+                                continue
+                            processed_wizards.add(wizard_obj_id)
+                            
+                            # Calculate wizard position with bounds checking
+                            if i < len(offsets):
+                                offset_x, offset_y = offsets[i]
+                            else:
+                                # Fallback for unexpected extra wizards
+                                angle = math.radians(i * 45)  # 45-degree spacing
+                                offset_x = int(25 * math.cos(angle))
+                                offset_y = int(25 * math.sin(angle)) - 5
+                            
+                            base_x, base_y = x + offset_x, y + offset_y
+                            
+                            # Check for movement animation
+                            wizard_id = f"{wizard.color}_{wizard_obj_id}"
+                            if (hasattr(self, 'animation_manager') and 
+                                animation_manager.is_wizard_moving(wizard_id)):
+                                wx, wy = animation_manager.get_wizard_position(wizard_id, (base_x, base_y))
+                            else:
+                                wx, wy = base_x, base_y
+                            
+                            # Get and validate wizard sprite
+                            try:
+                                sprite = sprite_manager.get_wizard_sprite(wizard.color)
+                                if not sprite:
+                                    continue
+                            except (AttributeError, KeyError):
+                                # Skip if sprite can't be loaded
+                                continue
+                            
+                            # Apply visual effects if needed
+                            try:
+                                if (getattr(wizard, 'is_blocking_highlighted', False) or 
+                                    wizard == self.selected_wizard):
+                                    current_time = pygame.time.get_ticks()
+                                    pulse_intensity = 0.5 + 0.5 * abs(math.sin(current_time * 0.005))
+                                    
+                                    if wizard == self.selected_wizard:
+                                        glow_color = (255, 255, 100)  # Yellow glow for selected
+                                    else:
+                                        glow_color = COLORS['gold'][:3]  # Gold glow for blocking
+                                    
+                                    sprite = sprite_manager.create_glowing_sprite(sprite, glow_color, pulse_intensity)
+                            except (AttributeError, KeyError, TypeError):
+                                # Continue with regular sprite if glow effect fails
+                                pass
+                            
+                            # Draw the wizard sprite
+                            try:
+                                sprite_rect = sprite.get_rect(center=(int(wx), int(wy)))
+                                self.screen.blit(sprite, sprite_rect)
+                            except (AttributeError, TypeError, ValueError):
+                                # Skip this wizard if drawing fails
+                                continue
+                            
+                            # Draw health indicator for damaged wizards
+                            try:
+                                if hasattr(wizard, 'health') and hasattr(wizard, 'max_health'):
+                                    if wizard.health < wizard.max_health and wizard.max_health > 0:
+                                        health_ratio = wizard.health / wizard.max_health
+                                        bar_width = 20
+                                        bar_height = 3
+                                        bar_x = int(wx - bar_width // 2)
+                                        bar_y = int(wy + 15)
+                                        
+                                        # Background bar
+                                        pygame.draw.rect(self.screen, (100, 100, 100), 
+                                                       (bar_x, bar_y, bar_width, bar_height))
+                                        # Health bar
+                                        health_width = int(bar_width * max(0, min(1, health_ratio)))
+                                        health_color = (255, 100, 100) if health_ratio < 0.5 else (255, 200, 100)
+                                        if health_width > 0:
+                                            pygame.draw.rect(self.screen, health_color, 
+                                                           (bar_x, bar_y, health_width, bar_height))
+                            except (AttributeError, TypeError, ValueError, ZeroDivisionError):
+                                # Skip health bar if calculation fails
+                                pass
+                                
+                        except (AttributeError, TypeError, KeyError):
+                            # Skip this wizard if any critical operation fails
+                            continue
+                            
+                except (AttributeError, TypeError, KeyError, ValueError):
+                    # Skip this position if processing fails
+                    continue
+                    
+        except Exception as e:
+            # Emergency fallback - log error but don't crash the game
+            print(f"ERROR in draw_wizards: {e}")
+            # Try to render at least something basic if possible
+            try:
+                for player in self.game.players:
+                    if hasattr(player, 'location') and player.location in self.position_coords:
+                        x, y = self.position_coords[player.location]
+                        # Draw a simple colored circle as fallback
+                        color_map = {'red': (255, 100, 100), 'blue': (100, 100, 255), 
+                                   'green': (100, 255, 100), 'yellow': (255, 255, 100)}
+                        color = color_map.get(player.color, (200, 200, 200))
+                        pygame.draw.circle(self.screen, color, (int(x), int(y)), 8)
+                        pygame.draw.circle(self.screen, (255, 255, 255), (int(x), int(y)), 8, 2)
+            except:
+                # If even the fallback fails, just return
+                pass
 
     def draw_ui(self):
         """Draw the user interface"""
@@ -1640,6 +1945,11 @@ class GameGUI:
             if is_hovered:
                 self.hovered_card_index = i
                 
+            # Add hover animation
+            if is_hovered:
+                hover_offset = -10
+                card_y += hover_offset
+                
             self.draw_spell_card_horizontal(
                 card, card_x, card_y, base_card_width, base_card_height,
                 True, False, is_hovered, current_player, i
@@ -1655,6 +1965,22 @@ class GameGUI:
             
             if is_hovered:
                 self.hovered_card_index = card_index
+                
+            # Add hover and selection animations
+            if is_hovered:
+                hover_offset = -8
+                card_y += hover_offset
+            
+            if is_selected:
+                # Add pulsing glow for selected cards
+                current_time = pygame.time.get_ticks()
+                pulse = 0.7 + 0.3 * abs(math.sin(current_time * 0.005))
+                glow_size = int(10 * pulse)
+                glow_surface = pygame.Surface((base_card_width + glow_size * 2, base_card_height + glow_size * 2), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surface, (255, 255, 100, 80), 
+                               (0, 0, base_card_width + glow_size * 2, base_card_height + glow_size * 2), 
+                               border_radius=10)
+                self.screen.blit(glow_surface, (card_x - glow_size, card_y - glow_size))
                 
             self.draw_spell_card_horizontal(
                 card, card_x, card_y, base_card_width, base_card_height,
@@ -2034,6 +2360,241 @@ class GameGUI:
             winner_text = winner_font.render(label, True, COLORS['gold'])
             winner_rect = winner_text.get_rect(center=(self.screen_width // 2, self.screen_height // 2))
             self.screen.blit(winner_text, winner_rect)
+
+    def _process_ai_turn_with_animations(self, current_player, current_time):
+        """Process AI turn with proper animation delays between actions"""
+        # Initial thinking delay
+        if not self.ai_turn_executed and (current_time - self.ai_turn_start_time) < self.ai_thinking_delay:
+            return
+            
+        # Generate actions queue if not done yet
+        if not self.ai_turn_executed and not self.ai_actions_queue:
+            self.ai_actions_queue = self._generate_ai_actions_queue(current_player)
+            self.ai_turn_executed = True
+            self.ai_last_action_time = current_time
+            self.ai_current_action_index = 0
+            
+        # Process actions from queue with delays
+        if self.ai_actions_queue and self.ai_current_action_index < len(self.ai_actions_queue):
+            # Check if enough time has passed since last action
+            if (current_time - self.ai_last_action_time) >= self.ai_action_delay:
+                action = self.ai_actions_queue[self.ai_current_action_index]
+                success = self._execute_ai_action_with_animation(action, current_player)
+                
+                if success:
+                    self.ai_current_action_index += 1
+                    self.ai_last_action_time = current_time
+                else:
+                    # Skip failed action
+                    self.ai_current_action_index += 1
+                    
+        # Check if turn should end
+        elif (self.game.current_actions >= self.game.max_actions_per_turn or 
+              self.ai_current_action_index >= len(self.ai_actions_queue)):
+            self.game.end_turn()
+            # Update button visibility for the new current player
+            new_current_player = self.game.get_current_player()
+            self.action_panel.set_ai_turn_state(isinstance(new_current_player, AIWizard))
+            # Reset for next turn
+            self.ai_turn_start_time = 0
+            self.ai_turn_executed = False
+            self.ai_actions_queue = []
+            self.ai_current_action_index = 0
+            
+    def _generate_ai_actions_queue(self, ai_player):
+        #"""Generate a queue of actions for the AI player to execute with animations - FIXED VERSION"""
+        actions_queue = []
+        
+        # Use the AI controller to determine actions
+        if hasattr(ai_player, 'ai_controller') and ai_player.ai_controller:
+            ai_controller = ai_player.ai_controller
+            
+            # FIXED: Create a simulation context without modifying actual game state
+            simulation_state = {
+                'original_actions': self.game.current_actions,
+                'simulated_location': ai_player.location,  # Track simulated position separately
+                'original_location': ai_player.location
+            }
+            
+            max_actions = min(self.game.max_actions_per_turn - simulation_state['original_actions'], 5)
+            
+            for action_index in range(max_actions):
+                if simulation_state['original_actions'] + action_index >= self.game.max_actions_per_turn:
+                    break
+                
+                # FIXED: Get possible actions using simulated state instead of modifying real state
+                possible_actions = self._get_ai_possible_actions_simulated(ai_controller, ai_player, simulation_state)
+                if not possible_actions:
+                    break
+                
+                # Select best action using simulated context
+                best_action = ai_controller._select_best_action(possible_actions, self.game)
+                if not best_action:
+                    break
+                
+                actions_queue.append(best_action)
+                
+                # FIXED: Update simulation state without touching real wizard location
+                if best_action['type'] == 'move':
+                    simulation_state['simulated_location'] = best_action['target']
+                    # Store the simulated position for reference, but don't modify wizard.location
+                    best_action['simulated_from'] = simulation_state['simulated_location']
+            
+            # NO RESTORATION NEEDED - we never modified the real state!
+        
+        return actions_queue
+    
+    def _get_ai_possible_actions_simulated(self, ai_controller, ai_player, simulation_state):
+        """Get possible AI actions using simulated state without modifying real game state"""
+        # Temporarily create a simulation context
+        original_location = ai_player.location
+        
+        try:
+            # SAFE: Only modify location for the duration of this method call
+            ai_player.location = simulation_state['simulated_location']
+            
+            # Get actions with the simulated position
+            possible_actions = ai_controller._get_possible_actions(self.game)
+            
+            return possible_actions
+            
+        finally:
+            # CRITICAL: Always restore the original location immediately
+            ai_player.location = original_location
+        
+    def _execute_ai_action_with_animation(self, action, ai_player):
+        """Execute a single AI action with proper animation - UPDATED VERSION"""
+        if not action:
+            return False
+        
+        action_type = action['type']
+        success = False
+        
+        try:
+            if action_type == 'cast_spell':
+                # Trigger spell animation first
+                self._trigger_ai_spell_animation(action, ai_player)
+                success = self.game.cast_spell(ai_player, action['spell_card'], self)
+            
+            elif action_type in ['mine_white_hex', 'mine_from_mine']:
+                # FIXED: Handle both hex and mine mining with proper animation
+                mine_color = action.get('mine_color', 'white')
+                self._trigger_ai_mining_animation(action, ai_player, mine_color)
+                
+                if action_type == 'mine_white_hex':
+                    success = self.game.mine_white_crystal(ai_player, action['position'])
+                else:  # mine_from_mine
+                    roll = random.randint(1, 6) if action['position'] != 'center' else random.choice([3, 2, 2, 1, 1, 1])
+                    success = self.game.resolve_mine_with_roll(ai_player, action['position'], roll)
+            
+            elif action_type == 'lay_card':
+                success = ai_player.lay_down_spell_card(action['card_index'])
+            
+            elif action_type == 'charge_card':
+                success = action['card'].add_crystals(action['color'], 1, ai_player)
+            
+            elif action_type == 'move':
+                # FIXED: Ensure movement animation uses correct positions
+                old_location = ai_player.location  # Use REAL current location
+                target_location = action['target']
+                
+                # Trigger movement animation BEFORE actually moving
+                if old_location in self.position_coords and target_location in self.position_coords:
+                    old_x, old_y = self.position_coords[old_location]
+                    new_x, new_y = self.position_coords[target_location]
+                    wizard_id = f"{ai_player.color}_{id(ai_player)}"
+                    
+                    animation_manager.start_wizard_movement(wizard_id, (old_x, old_y), (new_x, new_y), 0.5)
+                
+                # NOW execute the actual move
+                success = self.game.move_player(ai_player, target_location)
+            
+            return success
+            
+        except Exception as e:
+            print(f"AI action execution failed for {action_type}: {e}")
+            return False
+            
+    def _trigger_ai_spell_animation(self, action, ai_player):
+        """Trigger spell casting animation and effects for AI"""
+        try:
+            # Get wizard position
+            if ai_player.location in self.position_coords:
+                caster_x, caster_y = self.position_coords[ai_player.location]
+                
+                # Create spell cast effect at caster position
+                primary_color = self.get_wizard_color(ai_player.color)
+                if AI_ENABLE_PARTICLE_EFFECTS:
+                    particle_count = int(30 * AI_PARTICLE_DENSITY)
+                    particle_system.create_spell_cast_effect(caster_x, caster_y, primary_color, particle_count)
+                
+                # Create spell trail effects to adjacent enemies
+                adjacent_positions = self.game.board.get_adjacent_positions(ai_player.location)
+                for pos in adjacent_positions:
+                    if pos in self.position_coords:
+                        target_x, target_y = self.position_coords[pos]
+                        wizards_at_pos = self.game.board.get_wizard_at_position(pos)
+                        if wizards_at_pos and any(w != ai_player for w in wizards_at_pos):
+                            if AI_ENABLE_PARTICLE_EFFECTS:
+                                particle_system.create_spell_trail_effect(
+                                    caster_x, caster_y, target_x, target_y, primary_color
+                                )
+                
+                # Play spell cast sound
+                if AI_ENABLE_SOUND_EFFECTS:
+                    self.sound_manager.play_sound('spell_cast', 0.8)
+                    
+        except Exception as e:
+            print(f"Failed to trigger AI spell animation: {e}")
+            
+    def _trigger_ai_mining_animation(self, action, ai_player, crystal_type):
+        """Trigger mining animation and effects for AI"""
+        try:
+            position = action['position']
+            if position in self.position_coords:
+                mine_x, mine_y = self.position_coords[position]
+                
+                # Determine crystal color for effect
+                if crystal_type == 'white':
+                    crystal_color = 'white'
+                elif crystal_type == 'healing':
+                    crystal_color = 'healing'
+                else:
+                    # For colored crystals, use the mine's color
+                    crystal_color = self.game.board.get_mine_color(position) or 'white'
+                
+                # Create mining effect
+                if AI_ENABLE_PARTICLE_EFFECTS:
+                    particle_system.create_mining_effect(mine_x, mine_y, crystal_color)
+                    
+                    # Create crystal pickup effect
+                    particle_system.create_crystal_pickup_effect(mine_x, mine_y, crystal_color)
+                
+        except Exception as e:
+            print(f"Failed to trigger AI mining animation: {e}")
+            
+    def _trigger_ai_movement_animation(self, action, ai_player):
+        """Trigger movement animation for AI"""
+        try:
+            old_location = ai_player.location
+            new_location = action['target']
+            
+            if old_location in self.position_coords and new_location in self.position_coords:
+                old_x, old_y = self.position_coords[old_location]
+                new_x, new_y = self.position_coords[new_location]
+                wizard_id = f"{ai_player.color}_{id(ai_player)}"
+                
+                # Start movement animation with configurable duration
+                if AI_ENABLE_MOVEMENT_ANIMATION:
+                    duration_seconds = AI_MOVEMENT_DURATION / 1000.0  # Convert ms to seconds
+                    animation_manager.start_wizard_movement(wizard_id, (old_x, old_y), (new_x, new_y), duration_seconds)
+                
+                # Play movement sound
+                if AI_ENABLE_SOUND_EFFECTS:
+                    self.sound_manager.play_move()
+                    
+        except Exception as e:
+            print(f"Failed to trigger AI movement animation: {e}")
 
 def main():
     """Simple test to run the GUI with a sample game"""

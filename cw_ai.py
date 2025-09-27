@@ -245,49 +245,26 @@ class StrategicAI:
         try:
             # Mining actions
             if game.can_mine(self.wizard):
-                pos = self.wizard.location
+                self._add_mining_actions(actions, game)
+
+            try:
+                # Card actions (laying down and charging)
+                self._add_card_actions(actions, game)
+            except Exception as e:
+                logger.warning(f"Error checking card actions: {e}")
                 
-                # White crystal mining (no dice needed)
-                if (game.board.has_crystals_at_position(pos) and 
-                    not game.board.is_mine(pos) and 
-                    self.wizard.can_hold_more_crystals()):
-                    actions.append({
-                        'type': 'mine_white',
-                        'position': pos,
-                        'priority': 60
-                    })
-                    
-                # Colored crystal mining
-                if game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():
-                    mine_color = game.board.get_mine_color_from_position(pos)
-                    if mine_color:
-                        base_priority = 50
-                        if mine_color == self.wizard.color:
-                            base_priority += 20
-                        actions.append({
-                            'type': 'mine_colored',
-                            'position': pos,
-                            'color': mine_color,
-                            'priority': base_priority
-                        })
+            try:
+                # Movement actions - FIXED: Enhanced healing prioritization
+                if game.can_move(self.wizard):
+                    self._add_movement_actions(actions, game)
+            except Exception as e:
+                logger.warning(f"Error checking movement actions: {e}")
+                
+            return actions
         except Exception as e:
-            logger.warning(f"Error checking mining actions: {e}")
+            logger.warning(f"Error in getting possible actions: {e}")
+            return actions
             
-        try:
-            # Card actions (laying down and charging)
-            self._add_card_actions(actions, game)
-        except Exception as e:
-            logger.warning(f"Error checking card actions: {e}")
-            
-        try:
-            # Movement actions - FIXED: Enhanced healing prioritization
-            if game.can_move(self.wizard):
-                self._add_movement_actions(actions, game)
-        except Exception as e:
-            logger.warning(f"Error checking movement actions: {e}")
-            
-        return actions
-        
     def _evaluate_spell_cast(self, spell_card, enemies, game):
         """Evaluate the value of casting a spell"""
         base_value = 80
@@ -414,6 +391,48 @@ class StrategicAI:
                 
         return base_value
         
+    
+    def _add_mining_actions(self, actions, game):
+        """FIXED: Add mining actions with proper center mine handling"""
+        if not game.can_mine(self.wizard):
+            return
+            
+        pos = self.wizard.location
+        
+        # Check for white crystal mining on hex tiles
+        if (pos in game.board.positions and 
+            game.board.positions[pos].get('type') == 'outer_hexagon' and 
+            game.board.positions[pos].get('crystals', 0) > 0 and
+            self.wizard.can_hold_more_crystals()):
+            actions.append({
+                'type': 'mine_white_hex',
+                'position': pos,
+                'priority': 55
+            })
+        
+        # Check for mining from mines (including center white mine)
+        if game.board.is_mine(pos) and self.wizard.can_hold_more_crystals():
+            mine_color = game.board.get_mine_color_from_position(pos)
+            if mine_color and game.board.mines[mine_color]['crystals'] > 0:
+                base_priority = 45
+                
+                # Higher priority for center white mine (always good)
+                if pos == 'center':
+                    base_priority = 65
+                # Higher priority for own color mine
+                elif mine_color == self.wizard.color:
+                    base_priority = 60
+                # Special priority for white crystals (versatile)
+                elif mine_color == 'white':
+                    base_priority = 55
+                    
+                actions.append({
+                    'type': 'mine_from_mine',
+                    'position': pos,
+                    'mine_color': mine_color,
+                    'priority': base_priority
+                })
+
     def _add_movement_actions(self, actions, game):
         """FIXED: Add movement actions with enhanced healing prioritization"""
         # Use the correct method to get empty adjacent positions
@@ -538,7 +557,7 @@ class StrategicAI:
         return bonus
         
     def _execute_action(self, action, game):
-        """FIXED: Execute the chosen action with comprehensive error handling"""
+        """FIXED: Execute the chosen action with comprehensive error handling and animation support"""
         if not action:
             return False
             
@@ -546,18 +565,38 @@ class StrategicAI:
         success = False
         
         try:
+            # Trigger visual effects for AI actions if GUI is available
+            gui = game.gui if hasattr(game, 'gui') else None
+            
             if action_type == 'cast_spell':
-                success = game.cast_spell(self.wizard, action['spell_card'], 
-                                        gui=game.gui if hasattr(game, 'gui') else None)
+                # Add spell casting visual effects for AI
+                if gui:
+                    self._trigger_spell_animation(action, gui)
+                success = game.cast_spell(self.wizard, action['spell_card'], gui)
                                         
             elif action_type == 'mine_white':
+                # Add mining visual effects for AI
+                if gui:
+                    self._trigger_mining_animation(action, gui, 'white')
                 success = game.mine_white_crystal(self.wizard, action['position'])
                 
             elif action_type == 'heal':
+                # Add healing visual effects for AI
+                if gui:
+                    self._trigger_mining_animation(action, gui, 'healing')
                 roll = random.randint(1, 3)  # Healing springs die
                 success = game.resolve_mine_with_roll(self.wizard, action['position'], roll)
                 
-            elif action_type == 'mine_colored':
+            elif action_type == 'mine_white_hex':
+                # Mining white crystals from hex tiles
+                if gui:
+                    self._trigger_mining_animation(action, gui, 'white')
+                success = game.mine_white_crystal(self.wizard, action['position'])
+            
+            elif action_type == 'mine_from_mine':
+                # Mining from mines (colored or white mine)
+                if gui:
+                    self._trigger_mining_animation(action, gui, action.get('mine_color', 'colored'))
                 roll = random.randint(1, 6)  # Standard die
                 success = game.resolve_mine_with_roll(self.wizard, action['position'], roll)
                 
@@ -568,6 +607,9 @@ class StrategicAI:
                 success = action['card'].add_crystals(action['color'], 1, self.wizard)
                 
             elif action_type == 'move':
+                # Add movement animation for AI
+                if gui:
+                    self._trigger_movement_animation(action, gui)
                 success = game.move_player(self.wizard, action['target'])
                 
             self.last_action_type = action_type if success else None
@@ -576,6 +618,88 @@ class StrategicAI:
         except Exception as e:
             logger.warning(f"Action execution failed for {action_type}: {e}")
             return False
+            
+    def _trigger_spell_animation(self, action, gui):
+        """Trigger spell casting animation and effects for AI"""
+        try:
+            from particle_system import particle_system
+            
+            # Get wizard position
+            if self.wizard.location in gui.position_coords:
+                caster_x, caster_y = gui.position_coords[self.wizard.location]
+                
+                # Create spell cast effect at caster position
+                primary_color = gui.get_wizard_color(self.wizard.color)
+                particle_system.create_spell_cast_effect(caster_x, caster_y, primary_color, 30)
+                
+                # Create spell trail effects to adjacent enemies
+                adjacent_positions = gui.game.board.get_adjacent_positions(self.wizard.location)
+                for pos in adjacent_positions:
+                    if pos in gui.position_coords:
+                        target_x, target_y = gui.position_coords[pos]
+                        wizards_at_pos = gui.game.board.get_wizard_at_position(pos)
+                        if wizards_at_pos and any(w != self.wizard for w in wizards_at_pos):
+                            particle_system.create_spell_trail_effect(
+                                caster_x, caster_y, target_x, target_y, primary_color
+                            )
+                
+                # Play spell cast sound
+                if hasattr(gui, 'sound_manager'):
+                    gui.sound_manager.play_sound('spell_cast', 0.8)
+                    
+        except Exception as e:
+            logger.warning(f"Failed to trigger spell animation: {e}")
+            
+    def _trigger_mining_animation(self, action, gui, crystal_type):
+        """Trigger mining animation and effects for AI"""
+        try:
+            from particle_system import particle_system
+            
+            position = action['position']
+            if position in gui.position_coords:
+                mine_x, mine_y = gui.position_coords[position]
+                
+                # Determine crystal color for effect
+                if crystal_type == 'white':
+                    crystal_color = 'white'
+                elif crystal_type == 'healing':
+                    crystal_color = 'healing'
+                else:
+                    # For colored crystals, use the mine's color
+                    crystal_color = gui.game.board.get_mine_color(position) or 'white'
+                
+                # Create mining effect
+                particle_system.create_mining_effect(mine_x, mine_y, crystal_color)
+                
+                # Create crystal pickup effect
+                particle_system.create_crystal_pickup_effect(mine_x, mine_y, crystal_color)
+                
+        except Exception as e:
+            logger.warning(f"Failed to trigger mining animation: {e}")
+            
+    def _trigger_movement_animation(self, action, gui):
+        """Trigger movement animation for AI"""
+        try:
+            from animation_system import animation_manager
+            
+            old_location = self.wizard.location
+            new_location = action['target']
+            
+            if old_location in gui.position_coords and new_location in gui.position_coords:
+                old_x, old_y = gui.position_coords[old_location]
+                new_x, new_y = gui.position_coords[new_location]
+                wizard_id = f"{self.wizard.color}_{id(self.wizard)}"
+                
+                # Start movement animation
+                animation_manager.stop_wizard_movement(wizard_id)
+            animation_manager.start_wizard_movement(wizard_id, (old_x, old_y), (new_x, new_y), 0.3)
+                
+                # Play movement sound
+            if hasattr(gui, 'sound_manager'):
+                    gui.sound_manager.play_move()
+                    
+        except Exception as e:
+            logger.warning(f"Failed to trigger movement animation: {e}")
             
     def _calculate_affordability(self, card):
         """FIXED: Calculate how affordable a card is (0-1 scale) with proper White crystal support"""
